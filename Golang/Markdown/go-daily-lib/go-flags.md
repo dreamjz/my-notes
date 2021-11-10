@@ -26,9 +26,6 @@
  $ go get github.com/jessevdk/go-flags
 ```
 
-```sh
-$ go mod download
-```
 
 ```go
 package main
