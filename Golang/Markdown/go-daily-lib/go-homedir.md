@@ -34,7 +34,7 @@ func main() {
 ## 快速使用 quick start
 
 ```
-require github.com/mitchellh/go-homedir v1.1.0
+go get -u github.com/mitchellh/go-homedir v1.1.0
 ```
 
 ```go

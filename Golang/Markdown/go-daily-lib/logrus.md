@@ -9,7 +9,7 @@ golang标准库`log`仅提供了三组接口，功能过于简单。本次将介
 在 go module 中导入：
 
 ```
-require github.com/sirupsen/logrus latest
+go get -u github.com/sirupsen/logrus latest
 ```
 
 ```go

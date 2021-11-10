@@ -15,7 +15,7 @@
 在 go module 中引入：
 
 ```
-require github.com/spf13/viper latest
+go get -u github.com/spf13/viper latest
 ```
 
 配置文件使用TOML格式(语法快速入门可以看[learn X in Y miniutes](https://learnxinyminutes.com/docs/toml/))，config.toml:

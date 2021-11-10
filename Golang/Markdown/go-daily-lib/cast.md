@@ -9,7 +9,7 @@
 在go module中导入：
 
 ```
-require github.com/spf13/cast v1.4.1
+go get -u github.com/spf13/cast v1.4.1
 ```
 
 ```go

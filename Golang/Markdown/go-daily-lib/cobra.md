@@ -9,7 +9,7 @@ cobra是一个命令行程序库，可以用来编写命令行程序。同时也
 ## 快速开始 quick start
 
 ```
-require github.com/spf13/cobra v1.2.1
+go get -u github.com/spf13/cobra v1.2.1
 ```
 
 下面的例子将模拟`git version`命令，输出的结果通过调用`os/exec`调用外部的`git version`

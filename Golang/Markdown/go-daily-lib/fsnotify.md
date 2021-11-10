@@ -11,7 +11,7 @@
 在go module中导入：
 
 ```
-require github.com/fsnotify/fsnotify latest
+go get -u github.com/fsnotify/fsnotify latest
 ```
 
 ```go

@@ -26,14 +26,6 @@
  $ go get github.com/jessevdk/go-flags
 ```
 
-或者使用go moudel file
-
-```go
-module quick-start
-
-require github.com/jessevdk/go-flags latest
-```
-
 ```sh
 $ go mod download
 ```

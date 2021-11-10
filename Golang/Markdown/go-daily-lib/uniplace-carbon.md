@@ -20,7 +20,7 @@ go get github.com/uniplaces/carbon@latest
 或在`go module`中导入
 
 ```
-require github.com/uniplaces/carbon latest
+go get -u github.com/uniplaces/carbon latest
 ```
 
 ```go

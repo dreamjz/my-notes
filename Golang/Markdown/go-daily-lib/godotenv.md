@@ -9,7 +9,7 @@
 在go module 中导入：
 
 ```
-require github.com/joho/godotenv latest
+go get -u github.com/joho/godotenv latest
 ```
 
 ```go
