@@ -82,5 +82,15 @@ Cyclic dependencies may also cause memory leaks since each object holds on to th
 
 ## Debugging Import Cycles 
 
- The worst thing about the import cycle error is, Golang doesn’t tell you source file or part of the code which is causing the error. So it becomes tough to figure out when the codebase is large. You would be wondering around different 
+ The worst thing about the import cycle error is, Golang doesn’t tell you source file or part of the code which is causing the error. So it becomes tough to figure out when the codebase is large. You would be wondering around different files/packages to check where actually the issue is. Why golang do not  show the cause that causing the error? Because there is not a singe culprit source file in the cycle.
+
+But it does show the packages which are causing the issue. So you can look into those packages and fix the problem.
+
+To visualize the dependencies in your project, you can use [godepgraph](https://github.com/kisielk/godepgraph), a Go dependency graph visualization tool. It can be installed by running:
+
+```
+go get github.com/kisielk/godepgraph
+```
+
+
 
