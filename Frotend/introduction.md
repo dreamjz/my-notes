@@ -55,18 +55,22 @@ Javascript 引擎也称 JavaScript 解释器，用于解析网页中的js代码�
 
 ### 工作原理
 
+![](./image/browser_work.png)
 
-
-
----
-
-本文采用[Attribution-NonCommercial-ShareAlike 4.0 International](https://creativecommons.org/licenses/by-nc-sa/4.0/)进行许可
+1. User Interface : 用户界面（浏览器）
+2. Browser Engine : 浏览器引擎
+3. Rendering Engine : 显示请求的内容，渲染HTML和CSS
+4. NetWorking : 网络功能
+5. Javascript Interpreter : js解释器，解释执行js程序
+6. UI Backend : 绘制类似组合框和弹出窗口
+7. Data Persistence : 数据持久化
 
 
 ## 参考
 
 1. [认识Web和Web标准](https://web.qianguyihao.com/01-HTML/01-%E8%AE%A4%E8%AF%86Web%E5%92%8CWeb%E6%A0%87%E5%87%86.html#web%E3%80%81%E7%BD%91%E9%A1%B5%E3%80%81%E6%B5%8F%E8%A7%88%E5%99%A8)  qianguyihao
 2. [浏览器的介绍](https://web.qianguyihao.com/01-HTML/02-%E6%B5%8F%E8%A7%88%E5%99%A8%E7%9A%84%E4%BB%8B%E7%BB%8D.html) qianguyihao
+3. [How Browsers Work: Behind the scenes of modern web browsers](https://www.html5rocks.com/en/tutorials/internals/howbrowserswork/)
 
 
 
