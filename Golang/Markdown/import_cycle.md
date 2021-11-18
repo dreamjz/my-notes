@@ -96,7 +96,7 @@ package import-cycle-example/p1
 
 Go is highly focused on faster compile time rather than speed of execution (even willing to sacrifice some run-time performance for faster build). The Go compiler doesn't spend a lot of time trying to generate the most efficient possible machine code, it cares more about compiling lots of code quickly.
 
-Allowing cyclic/circular dependencies would **significantly increase compile times** since the entire circle of dependencies would need to get recompiled every           time one of the dependencies changed. It also increases the link-time cost and makes it hard to test/reuse things independently(more difficult to unit test because they cannot be tested in isolation from one another). Cyclic dependencies can result in infinite recursions sometimes.
+Allowing cyclic/circular dependencies would **significantly increase compile times** since the entire circle of dependencies would need to get recompiled everytime one of the dependencies changed. It also increases the link-time cost and makes it hard to test/reuse things independently(more difficult to unit test because they cannot be tested in isolation from one another). Cyclic dependencies can result in infinite recursions sometimes.
 
 Cyclic dependencies may also cause memory leaks since each object holds on to the other, their reference counts will never reach zero and hence will never become candidates for collection and cleanup.
 
