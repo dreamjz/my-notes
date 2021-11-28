@@ -1,4 +1,4 @@
-# Small Tips
+# Some Tips
 
 ## 1.1 Git文件夹名称大小写
 
