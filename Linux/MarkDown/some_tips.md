@@ -1,8 +1,8 @@
-# Some Tips
+# Tips
 
 记录一些Linux小技巧
 
-## 1.1 Tree 命令列出文件结构
+## 1. Tree 命令列出文件结构
 
 安装tree,以manjaro为例:
 
@@ -34,6 +34,12 @@ tree -d
 ├── grep_test
 └── sort_test
 ```
+
+## 2. AUR 一个或多个文件没有通过有效性检查
+
+1. 编辑pkgbuild文件（可以用pamac里搜索对应的aur软件进入软件详情界面，点击构建文件，直接修改）
+2. 找到对应的验证部分，把里面的验证的码修改为SKIP，SKIP一定要是大写（md5sums sha1sums sha256sums sha224sums, sha384sums, sha512sums b2sums）
+3. 点击构建就能够成功了
 
 
 
