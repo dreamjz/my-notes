@@ -770,8 +770,869 @@ module.exports = {
 }
 ```
 
+#### 9.6.2 URL 转换规则
 
+- 如果 URL 是一个绝对路径 (例如 `/images/foo.png`)，它将会被保留不变。
 
-## Reference
+- 如果 URL 以 `.` 开头，它会作为一个相对模块请求被解释且基于你的文件系统中的目录结构进行解析。
+
+- 如果 URL 以 `~` 开头，其后的任何内容都会作为一个模块请求被解析。这意味着你甚至可以引用 Node 模块中的资源：
+
+  ```html
+  <img src="~some-npm-package/foo.png">
+  ```
+
+- 如果 URL 以 `@` 开头，它也会作为一个模块请求被解析。它的用处在于 Vue CLI 默认会设置一个指向 `<projectRoot>/src` 的别名 `@`
+
+#### 9.6.3  `public` 文件夹
+
+任何放置在 `public` 文件夹的静态资源将会被简单复制，而不经过 webpack, 需要通过绝对路径引用它们
+
+推荐将资源作为模块依赖图的一部分导入，这样将会通过 webpack 处理：
+
+- 脚本和样式表会被压缩且打包在一起，从而避免额外的网络请求
+- 文件丢失会直接在编译时报错，而不是到了用户端才产生 404 错误
+- 最终生成的文件名包含了内容哈希，因此你不必担心浏览器会缓存它们的老版本
+
+`public` 目录提供的是一个**应急手段**，当你通过绝对路径引用它时，留意应用将会部署到哪里。如果你的应用没有部署在域名的根部，那么你需要为你的 URL 配置 [publicPath](https://cli.vuejs.org/zh/config/#publicpath) 前缀:
+
+- 在 `public/index.html` 或其它通过 `html-webpack-plugin` 用作模板的 HTML 文件中，你需要通过 `<%= BASE_URL %>` 设置链接前缀：
+
+  ```html
+  <link rel="icon" href="<%= BASE_URL %>favicon.ico">
+  ```
+
+- 在模板中，你首先需要向你的组件传入基础 URL：
+
+  ```js
+  data () {
+    return {
+      publicPath: process.env.BASE_URL
+    }
+  }
+  ```
+
+  然后：
+
+  ```html
+  <img :src="`${publicPath}my-image.png`">
+  ```
+
+**何时该使用 pulic 文件夹**
+
+- 你需要在构建输出中指定一个文件的名字。
+- 你有上千个图片，需要动态引用它们的路径。
+- 有些库可能和 webpack 不兼容，这时你除了将其用一个独立的 `<script>` 标签引入没有别的选择
+
+## 10. CSS
+
+Vue CLI 项目天生支持 [PostCSS](http://postcss.org/)、[CSS Modules](https://github.com/css-modules/css-modules) 和包含 [Sass](https://sass-lang.com/)、[Less](http://lesscss.org/)、[Stylus](http://stylus-lang.com/) 在内的预处理器
+
+### 10.1 引用静态资源
+
+所有编译后的 CSS 都会通过 [css-loader](https://github.com/webpack-contrib/css-loader) 来解析其中的 `url()` 引用，并将这些引用作为模块请求来处理。这意味着你可以根据本地的文件结构用相对路径来引用静态资源。另外要注意的是如果你想要引用一个 npm 依赖中的文件，或是想要用 webpack alias，则需要在路径前加上 `~` 的前缀来避免歧义
+
+### 10.2 预处理器
+
+你可以在创建项目的时候选择预处理器 (Sass/Less/Stylus)。如果当时没有选好，内置的 webpack 仍然会被预配置为可以完成所有的处理。你也可以手动安装相应的 webpack loader：
+
+```bash
+# Sass
+npm install -D sass-loader sass
+
+# Less
+npm install -D less-loader less
+
+# Stylus
+npm install -D stylus-loader stylus
+```
+
+然后你就可以导入相应的文件类型，或在 `*.vue` 文件中这样来使用：
+
+```vue
+<style lang="scss">
+$color: red;
+</style>
+```
+
+#### 10.2.1 自动化导入
+
+如果你想自动化导入文件 (用于颜色、变量、mixin……)，你可以使用 [style-resources-loader](https://github.com/yenshih/style-resources-loader)。这里有一个关于 Stylus 的在每个单文件组件和 Stylus 文件中导入 `./src/styles/imports.styl` 的例子：
+
+```js
+// vue.config.js
+const path = require('path')
+
+module.exports = {
+  chainWebpack: config => {
+    const types = ['vue-modules', 'vue', 'normal-modules', 'normal']
+    types.forEach(type => addStyleResource(config.module.rule('stylus').oneOf(type)))
+  },
+}
+
+function addStyleResource (rule) {
+  rule.use('style-resource')
+    .loader('style-resources-loader')
+    .options({
+      patterns: [
+        path.resolve(__dirname, './src/styles/imports.styl'),
+      ],
+    })
+}
+```
+
+也可以选择使用 [vue-cli-plugin-style-resources-loader](https://www.npmjs.com/package/vue-cli-plugin-style-resources-loader)
+
+### 10.3 PostCSS
+
+Vue CLI 内部使用了 PostCSS。
+
+你可以通过 `.postcssrc` 或任何 [postcss-load-config](https://github.com/michael-ciniawsky/postcss-load-config) 支持的配置源来配置 PostCSS。也可以通过 `vue.config.js` 中的 `css.loaderOptions.postcss` 配置 [postcss-loader](https://github.com/postcss/postcss-loader)。
+
+我们默认开启了 [autoprefixer](https://github.com/postcss/autoprefixer)。如果要配置目标浏览器，可使用 `package.json` 的 [browserslist](https://cli.vuejs.org/zh/guide/browser-compatibility.html#browserslist) 字段
+
+** CSS 中浏览器前缀规则的注意事项**
+
+在生产环境构建中，Vue CLI 会优化 CSS 并基于目标浏览器抛弃不必要的浏览器前缀规则。因为默认开启了 `autoprefixer`，你只使用无前缀的 CSS 规则即可
+
+### 10.4 CSS Modules
+
+你可以通过 `<style module>` 以开箱即用的方式[在 `*.vue` 文件中使用 CSS Modules](https://vue-loader.vuejs.org/zh/guide/css-modules.html)。
+
+如果想在 JavaScript 中作为 CSS Modules 导入 CSS 或其它预处理文件，该文件应该以 `.module.(css|less|sass|scss|styl)` 结尾：
+
+```js
+import styles from './foo.module.css'
+// 所有支持的预处理器都一样工作
+import sassStyles from './foo.module.scss'
+```
+
+如果你想去掉文件名中的 `.module`，可以设置 `vue.config.js` 中的 `css.requireModuleExtension` 为 `false`：
+
+```js
+// vue.config.js
+module.exports = {
+  css: {
+    requireModuleExtension: false
+  }
+}
+```
+
+如果你希望自定义生成的 CSS Modules 模块的类名，可以通过 `vue.config.js` 中的 `css.loaderOptions.css` 选项来实现。所有的 `css-loader` 选项在这里都是支持的，例如 `localIdentName` 和 `camelCase`：
+
+```js
+// vue.config.js
+module.exports = {
+  css: {
+    loaderOptions: {
+      css: {
+        // 注意：以下配置在 Vue CLI v4 与 v3 之间存在差异。
+        // Vue CLI v3 用户可参考 css-loader v1 文档
+        // https://github.com/webpack-contrib/css-loader/tree/v1.0.1
+        modules: {
+          localIdentName: '[name]-[hash]'
+        },
+        localsConvention: 'camelCaseOnly'
+      }
+    }
+  }
+}
+```
+
+### 10.5 向预处理器 Loader 传递选项
+
+有的时候你想要向 webpack 的预处理器 loader 传递选项。你可以使用 `vue.config.js` 中的 `css.loaderOptions` 选项。比如你可以这样向所有 Sass/Less 样式传入共享的全局变量：
+
+```js
+// vue.config.js
+module.exports = {
+  css: {
+    loaderOptions: {
+      // 给 sass-loader 传递选项
+      sass: {
+        // @/ 是 src/ 的别名
+        // 所以这里假设你有 `src/variables.sass` 这个文件
+        // 注意：在 sass-loader v8 中，这个选项名是 "prependData"
+        additionalData: `@import "~@/variables.sass"`
+      },
+      // 默认情况下 `sass` 选项会同时对 `sass` 和 `scss` 语法同时生效
+      // 因为 `scss` 语法在内部也是由 sass-loader 处理的
+      // 但是在配置 `prependData` 选项的时候
+      // `scss` 语法会要求语句结尾必须有分号，`sass` 则要求必须没有分号
+      // 在这种情况下，我们可以使用 `scss` 选项，对 `scss` 语法进行单独配置
+      scss: {
+        additionalData: `@import "~@/variables.scss";`
+      },
+      // 给 less-loader 传递 Less.js 相关选项
+      less:{
+        // http://lesscss.org/usage/#less-options-strict-units `Global Variables`
+        // `primary` is global variables fields name
+        globalVars: {
+          primary: '#fff'
+        }
+      }
+    }
+  }
+}
+```
+
+Loader 可以通过 `loaderOptions` 配置，包括：
+
+- [css-loader](https://github.com/webpack-contrib/css-loader)
+- [postcss-loader](https://github.com/postcss/postcss-loader)
+- [sass-loader](https://github.com/webpack-contrib/sass-loader)
+- [less-loader](https://github.com/webpack-contrib/less-loader)
+- [stylus-loader](https://github.com/shama/stylus-loader)
+
+**tips**
+
+这样做比使用 `chainWebpack` 手动指定 loader 更推荐，因为这些选项需要应用在使用了相应 loader 的多个地方
+
+## 11. Webpack 
+
+### 11.1 简单配置
+
+调整 webpack 配置最简单的方式就是在 `vue.config.js` 中的 `configureWebpack` 选项提供一个对象：
+
+```js
+// vue.config.js
+module.exports = {
+  configureWebpack: {
+    plugins: [
+      new MyAwesomeWebpackPlugin()
+    ]
+  }
+}
+```
+
+该对象将会被 [webpack-merge](https://github.com/survivejs/webpack-merge) 合并入最终的 webpack 配置。
+
+警告
+
+有些 webpack 选项是基于 `vue.config.js` 中的值设置的，所以不能直接修改。例如你应该修改 `vue.config.js` 中的 `outputDir` 选项而不是修改 `output.path`；你应该修改 `vue.config.js` 中的 `publicPath` 选项而不是修改 `output.publicPath`。这样做是因为 `vue.config.js` 中的值会被用在配置里的多个地方，以确保所有的部分都能正常工作在一起。
+
+如果你需要基于环境有条件地配置行为，或者想要直接修改配置，那就换成一个函数 (该函数会在环境变量被设置之后懒执行)。该方法的第一个参数会收到已经解析好的配置。在函数内，你可以直接修改配置，或者返回一个将会被合并的对象：
+
+```js
+// vue.config.js
+module.exports = {
+  configureWebpack: config => {
+    if (process.env.NODE_ENV === 'production') {
+      // 为生产环境修改配置...
+    } else {
+      // 为开发环境修改配置...
+    }
+  }
+}
+```
+
+### 11.2 链式操作 (高级)
+
+Vue CLI 内部的 webpack 配置是通过 [webpack-chain](https://github.com/mozilla-neutrino/webpack-chain) 维护的。这个库提供了一个 webpack 原始配置的上层抽象，使其可以定义具名的 loader 规则和具名插件，并有机会在后期进入这些规则并对它们的选项进行修改。
+
+它允许我们更细粒度的控制其内部配置。接下来有一些常见的在 `vue.config.js` 中的 `chainWebpack` 修改的例子。
+
+提示
+
+当你打算链式访问特定的 loader 时，[vue inspect](https://cli.vuejs.org/zh/guide/webpack.html#审查项目的-webpack-配置) 会非常有帮助。
+
+#### 11.2.1 修改 Loader 选项
+
+```js
+// vue.config.js
+module.exports = {
+  chainWebpack: config => {
+    config.module
+      .rule('vue')
+      .use('vue-loader')
+        .tap(options => {
+          // 修改它的选项...
+          return options
+        })
+  }
+}
+```
+
+提示
+
+对于 CSS 相关 loader 来说，我们推荐使用 [css.loaderOptions](https://cli.vuejs.org/zh/config/#css-loaderoptions) 而不是直接链式指定 loader。这是因为每种 CSS 文件类型都有多个规则，而 `css.loaderOptions` 可以确保你通过一个地方影响所有的规则。
+
+#### 11.2.2 添加一个新的 Loader
+
+```js
+// vue.config.js
+module.exports = {
+  chainWebpack: config => {
+    // GraphQL Loader
+    config.module
+      .rule('graphql')
+      .test(/\.graphql$/)
+      .use('graphql-tag/loader')
+        .loader('graphql-tag/loader')
+        .end()
+      // 你还可以再添加一个 loader
+      .use('other-loader')
+        .loader('other-loader')
+        .end()
+  }
+}
+```
+
+#### 11.2.3 替换一个规则里的 Loader
+
+如果你想要替换一个已有的[基础 loader](https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-service/lib/config/base.js)，例如为内联的 SVG 文件使用 `vue-svg-loader` 而不是加载这个文件：
+
+```js
+// vue.config.js
+module.exports = {
+  chainWebpack: config => {
+    const svgRule = config.module.rule('svg')
+
+    // 清除已有的所有 loader。
+    // 如果你不这样做，接下来的 loader 会附加在该规则现有的 loader 之后。
+    svgRule.uses.clear()
+
+    // 添加要替换的 loader
+    svgRule
+      .use('vue-svg-loader')
+        .loader('vue-svg-loader')
+  }
+}
+```
+
+#### 11.2.4 修改插件选项
+
+```js
+// vue.config.js
+module.exports = {
+  chainWebpack: config => {
+    config
+      .plugin('html')
+      .tap(args => {
+        return [/* 传递给 html-webpack-plugin's 构造函数的新参数 */]
+      })
+  }
+}
+```
+
+你需要熟悉 [webpack-chain 的 API](https://github.com/mozilla-neutrino/webpack-chain#getting-started) 并[阅读一些源码](https://github.com/vuejs/vue-cli/tree/dev/packages/%40vue/cli-service/lib/config)以便了解如何最大程度利用好这个选项，但是比起直接修改 webpack 配置，它的表达能力更强，也更为安全。
+
+比方说你想要将 `index.html` 默认的路径从 */Users/username/proj/public/index.html* 改为 */Users/username/proj/app/templates/index.html*。通过参考 [html-webpack-plugin](https://github.com/jantimon/html-webpack-plugin#options) 你能看到一个可以传入的选项列表。我们可以在下列配置中传入一个新的模板路径来改变它：
+
+```js
+// vue.config.js
+module.exports = {
+  chainWebpack: config => {
+    config
+      .plugin('html')
+      .tap(args => {
+        args[0].template = '/Users/username/proj/app/templates/index.html'
+        return args
+      })
+  }
+}
+```
+
+你可以通过接下来要讨论的工具 **`vue inspect`** 来确认变更。
+
+### 11.3 审查项目的 webpack 配置
+
+因为 `@vue/cli-service` 对 webpack 配置进行了抽象，所以理解配置中包含的东西会比较困难，尤其是当你打算自行对其调整的时候。
+
+`vue-cli-service` 暴露了 `inspect` 命令用于审查解析好的 webpack 配置。那个全局的 `vue` 可执行程序同样提供了 `inspect` 命令，这个命令只是简单的把 `vue-cli-service inspect` 代理到了你的项目中。
+
+该命令会将解析出来的 webpack 配置、包括链式访问规则和插件的提示打印到 stdout。
+
+你可以将其输出重定向到一个文件以便进行查阅：
+
+```bash
+vue inspect > output.js
+```
+
+注意它输出的并不是一个有效的 webpack 配置文件，而是一个用于审查的被序列化的格式。
+
+你也可以通过指定一个路径来审查配置的一小部分：
+
+```bash
+# 只审查第一条规则
+vue inspect module.rules.0
+```
+
+或者指向一个规则或插件的名字：
+
+```bash
+vue inspect --rule vue
+vue inspect --plugin html
+```
+
+最后，你可以列出所有规则和插件的名字：
+
+```bash
+vue inspect --rules
+vue inspect --plugins
+```
+
+### 11.4 以一个文件的方式使用解析好的配置
+
+有些外部工具可能需要通过一个文件访问解析好的 webpack 配置，比如那些需要提供 webpack 配置路径的 IDE 或 CLI。在这种情况下你可以使用如下路径：
+
+```text
+<projectRoot>/node_modules/@vue/cli-service/webpack.config.js
+```
+
+该文件会动态解析并输出 `vue-cli-service` 命令中使用的相同的 webpack 配置，包括那些来自插件甚至是你自定义的配置。
+
+## 12. 模式和环境变量
+
+### 12.1 模式
+
+默认情况下，Vue CLI 项目由三个模式：
+
+- `development`: 用于 `vue-cli-service serve`
+- `test`: 用于 `vue-cli-service test:uint`
+- `prodution`: 用于 `vue-cli-service build` 和 `vue-cli-service test:e2e`
+
+可以通过传递 `--mode` 选项参数为命令行覆写默认的模式
+
+```sh
+vue-cli-service build --mode development
+```
+
+当运行 `vue-cli-service` 命令时，所有的环境变量都从对应的环境文件中载入，若文件中不包含 `NODE_ENV` 变量，其值将取决于模式,例如，在 `production` 模式下被设置为 `"production"`，在 `test` 模式下被设置为 `"test"`，默认则是 `"development"`
+
+`NODE_ENV` 将决定您的应用运行的模式，是开发，生产还是测试，因此也决定了创建哪种 webpack 配置。
+
+例如通过将 `NODE_ENV` 设置为 `"test"`，Vue CLI 会创建一个优化过后的，并且旨在用于单元测试的 webpack 配置，它并不会处理图片以及一些对单元测试非必需的其他资源。
+
+同理，`NODE_ENV=development` 创建一个 webpack 配置，该配置启用热更新，不会对资源进行 hash 也不会打出 vendor bundles，目的是为了在开发的时候能够快速重新构建。
+
+当你运行 `vue-cli-service build` 命令时，无论你要部署到哪个环境，应该始终把 `NODE_ENV` 设置为 `"production"` 来获取可用于部署的应用程序
+
+**tips**
+
+如果在环境中有默认的 `NODE_ENV`，你应该移除它或在运行 `vue-cli-service` 命令的时候明确地设置 `NODE_ENV`
+
+### 12.2 环境变量
+
+可以在你的项目根目录中放置下列文件来指定环境变量：
+
+```bash
+.env                # 在所有的环境中被载入
+.env.local          # 在所有的环境中被载入，但会被 git 忽略
+.env.[mode]         # 只在指定的模式中被载入
+.env.[mode].local   # 只在指定的模式中被载入，但会被 git 忽略
+```
+
+一个环境文件只包含环境变量的 key-value
+
+```
+FOO=bar
+VUE_APP_NOT_SECRET_CODE=some_value
+```
+
+**tips**
+
+不要在你的应用程序中存储任何机密信息（例如私有 API 密钥）！
+
+环境变量会随着构建打包嵌入到输出代码，意味着任何人都有机会能够看到它
+
+只有 `NODE_ENV`，`BASE_URL` 和以 `VUE_APP_` 开头的变量将通过 `webpack.DefinePlugin` 静态地嵌入到*客户端侧*的代码中。这是为了避免意外公开机器上可能具有相同名称的私钥
+
+想要了解解析环境文件规则的细节，请参考 [dotenv](https://github.com/motdotla/dotenv#rules)。我们也使用 [dotenv-expand](https://github.com/motdotla/dotenv-expand) 来实现变量扩展 (Vue CLI 3.5+ 支持)。例如：
+
+```bash
+FOO=foo
+BAR=bar
+
+CONCAT=$FOO$BAR # CONCAT=foobar
+```
+
+被载入的变量将会对 `vue-cli-service` 的所有命令、插件和依赖可用
+
+**环境文件加载优先级**
+
+为一个特定模式准备的环境文件 (例如 `.env.production`) 将会比一般的环境文件 (例如 `.env`) 拥有更高的优先级
+
+此外，Vue CLI 启动时已经存在的环境变量拥有最高优先级，并不会被 `.env` 文件覆写
+
+`.env` 环境文件是通过运行 `vue-cli-service` 命令载入的，因此环境文件发生变化，你需要重启服务
+
+示例：**Staging** 模式
+
+假设我们有一个应用包含以下 `.env` 文件：
+
+```text
+VUE_APP_TITLE=My App
+```
+
+和 `.env.staging` 文件：
+
+```text
+NODE_ENV=production
+VUE_APP_TITLE=My App (staging)
+```
+
+- `vue-cli-service build` 会加载可能存在的 `.env`、`.env.production` 和 `.env.production.local` 文件然后构建出生产环境应用。
+- `vue-cli-service build --mode staging` 会在 staging 模式下加载可能存在的 `.env`、`.env.staging` 和 `.env.staging.local` 文件然后构建出生产环境应用。
+
+这两种情况下，根据 `NODE_ENV`，构建出的应用都是生产环境应用，但是在 staging 版本中，`process.env.VUE_APP_TITLE` 被覆写成了另一个值
+
+### 12.3 在客户端侧代码中使用环境变量
+
+只有以 `VUE_APP_` 开头的变量会被 `webpack.DefinePlugin` 静态嵌入到客户端侧的包中。你可以在应用的代码中这样访问它们：
+
+```js
+console.log(process.env.VUE_APP_SECRET)
+```
+
+在构建过程中，`process.env.VUE_APP_SECRET` 将会被相应的值所取代。在 `VUE_APP_SECRET=secret` 的情况下，它会被替换为 `"secret"`。
+
+除了 `VUE_APP_*` 变量之外，在你的应用代码中始终可用的还有两个特殊的变量：
+
+- `NODE_ENV` - 会是 `"development"`、`"production"` 或 `"test"` 中的一个。具体的值取决于应用运行的[模式](https://cli.vuejs.org/zh/guide/mode-and-env.html#模式)。
+- `BASE_URL` - 会和 `vue.config.js` 中的 `publicPath` 选项相符，即你的应用会部署到的基础路径。
+
+所有解析出来的环境变量都可以在 `public/index.html` 中以 [HTML 插值](https://cli.vuejs.org/zh/guide/html-and-static-assets.html#插值)中介绍的方式使用
+
+**tips**
+
+你可以在 `vue.config.js` 文件中计算环境变量。它们仍然需要以 `VUE_APP_` 前缀开头。这可以用于版本信息:
+
+```js
+process.env.VUE_APP_VERSION = require('./package.json').version
+
+module.exports = {
+  // config
+}
+```
+
+### 12.4 本地环境
+
+有的时候你可能有一些不应该提交到代码仓库中的变量，尤其是当你的项目托管在公共仓库时。这种情况下你应该使用一个 `.env.local` 文件取而代之。本地环境文件默认会被忽略，且出现在 `.gitignore` 中。
+
+`.local` 也可以加在指定模式的环境文件上，比如 `.env.development.local` 将会在 development 模式下被载入，且被 git 忽略
+
+## 13. 构建目标
+
+当你运行 `vue-cli-service build` 时，你可以通过 `--target` 选项指定不同的构建目标。它允许你将相同的源代码根据不同的用例生成不同的构建
+
+### 13.1 应用
+
+应用模式是默认的模式。在这个模式中：
+
+- `index.html` 会带有注入的资源和 resource hint
+- 第三方库会被分到一个独立包以便更好的缓存
+- 小于 4kb 的静态资源会被内联在 JavaScript 中
+- `public` 中的静态资源会被复制到输出目录中
+
+### 13.2 库
+
+关于 IE 兼容性的提醒
+
+在库模式中，项目的 `publicPath` 是根据主文件的加载路径[动态设置](https://github.com/vuejs/vue-cli/blob/dev/packages/@vue/cli-service/lib/commands/build/setPublicPath.js)的（用以支持动态的资源加载能力）。但是这个功能用到了 `document.currentScript`，而 IE 浏览器并不支持这一特性。所以如果网站需要支持 IE 的话，建议使用库之前先在页面上引入 [current-script-polyfill](https://www.npmjs.com/package/current-script-polyfill)。
+
+注意对 Vue 的依赖
+
+在库模式中，Vue 是*外置的*。这意味着包中不会有 Vue，即便你在代码中导入了 Vue。如果这个库会通过一个打包器使用，它将尝试通过打包器以依赖的方式加载 Vue；否则就会回退到一个全局的 `Vue` 变量。
+
+要避免此行为，可以在`build`命令中添加`--inline-vue`标志。
+
+```text
+vue-cli-service build --target lib --inline-vue
+```
+
+你可以通过下面的命令将一个单独的入口构建为一个库：
+
+```text
+vue-cli-service build --target lib --name myLib [entry]
+File                     Size                     Gzipped
+
+dist/myLib.umd.min.js    13.28 kb                 8.42 kb
+dist/myLib.umd.js        20.95 kb                 10.22 kb
+dist/myLib.common.js     20.57 kb                 10.09 kb
+dist/myLib.css           0.33 kb                  0.23 kb
+```
+
+这个入口可以是一个 `.js` 或一个 `.vue` 文件。如果没有指定入口，则会使用 `src/App.vue`。
+
+构建一个库会输出：
+
+- `dist/myLib.common.js`：一个给打包器用的 CommonJS 包 (不幸的是，webpack 目前还并没有支持 ES modules 输出格式的包)
+- `dist/myLib.umd.js`：一个直接给浏览器或 AMD loader 使用的 UMD 包
+- `dist/myLib.umd.min.js`：压缩后的 UMD 构建版本
+- `dist/myLib.css`：提取出来的 CSS 文件 (可以通过在 `vue.config.js` 中设置 `css: { extract: false }` 强制内联)
+
+警告
+
+如果你在开发一个库或多项目仓库 (monorepo)，请注意导入 CSS **是具有副作用的**。请确保在 `package.json` 中**移除** `"sideEffects": false`，否则 CSS 代码块会在生产环境构建时被 webpack 丢掉。
+
+#### 13.2.1 Vue vs. JS/TS 入口文件
+
+当使用一个 `.vue` 文件作为入口时，你的库会直接暴露这个 Vue 组件本身，因为组件始终是默认导出的内容。
+
+然而，当你使用一个 `.js` 或 `.ts` 文件作为入口时，它可能会包含具名导出，所以库会暴露为一个模块。也就是说你的库必须在 UMD 构建中通过 `window.yourLib.default` 访问，或在 CommonJS 构建中通过 `const myLib = require('mylib').default` 访问。如果你没有任何具名导出并希望直接暴露默认导出，你可以在 `vue.config.js` 中使用以下 webpack 配置：
+
+```js
+module.exports = {
+  configureWebpack: {
+    output: {
+      libraryExport: 'default'
+    }
+  }
+}
+```
+
+### 13.3 Web Components 组件
+
+兼容性提示
+
+Web Components 模式不支持 IE11 及更低版本。[更多细节](https://github.com/vuejs/vue-docs-zh-cn/blob/master/vue-web-component-wrapper/README.md#兼容性)
+
+注意对 Vue 的依赖
+
+在 Web Components 模式中，Vue 是*外置的*。这意味着包中不会有 Vue，即便你在代码中导入了 Vue。这里的包会假设在页面中已经有一个可用的全局变量 `Vue`。
+
+你可以通过下面的命令将一个单独的入口构建为一个 Web Components 组件：
+
+```text
+vue-cli-service build --target wc --name my-element [entry]
+```
+
+注意这里的入口应该是一个 `*.vue` 文件。Vue CLI 将会把这个组件自动包裹并注册为 Web Components 组件，无需在 `main.js` 里自行注册。也可以在开发时把 `main.js` 作为 demo app 单独使用。
+
+该构建将会产生一个单独的 JavaScript 文件 (及其压缩后的版本) 将所有的东西都内联起来。当这个脚本被引入网页时，会注册自定义组件 `<my-element>`，其使用 `@vue/web-component-wrapper` 包裹了目标的 Vue 组件。这个包裹器会自动代理属性、特性、事件和插槽。请查阅 [`@vue/web-component-wrapper` 的文档](https://github.com/vuejs/vue-docs-zh-cn/blob/master/vue-web-component-wrapper/README.md)了解更多细节。
+
+**注意这个包依赖了在页面上全局可用的 `Vue`。**
+
+这个模式允许你的组件的使用者以一个普通 DOM 元素的方式使用这个 Vue 组件：
+
+```html
+<script src="https://unpkg.com/vue"></script>
+<script src="path/to/my-element.js"></script>
+
+<!-- 可在普通 HTML 中或者其它任何框架中使用 -->
+<my-element></my-element>
+```
+
+#### 13.3.1 注册多个 Web Components 组件的包
+
+当你构建一个 Web Components 组件包的时候，你也可以使用一个 glob 表达式作为入口指定多个组件目标：
+
+```text
+vue-cli-service build --target wc --name foo 'src/components/*.vue'
+```
+
+当你构建多个 web component 时，`--name` 将会用于设置前缀，同时自定义元素的名称会由组件的文件名推导得出。比如一个名为 `HelloWorld.vue` 的组件携带 `--name foo` 将会生成的自定义元素名为 `<foo-hello-world>`。
+
+#### 13.3.2 异步 Web Components 组件
+
+当指定多个 Web Components 组件作为目标时，这个包可能会变得非常大，并且用户可能只想使用你的包中注册的一部分组件。这时异步 Web Components 模式会生成一个 code-split 的包，带一个只提供所有组件共享的运行时，并预先注册所有的自定义组件小入口文件。一个组件真正的实现只会在页面中用到自定义元素相应的一个实例时按需获取：
+
+```text
+vue-cli-service build --target wc-async --name foo 'src/components/*.vue'
+File                Size                        Gzipped
+
+dist/foo.0.min.js    12.80 kb                    8.09 kb
+dist/foo.min.js      7.45 kb                     3.17 kb
+dist/foo.1.min.js    2.91 kb                     1.02 kb
+dist/foo.js          22.51 kb                    6.67 kb
+dist/foo.0.js        17.27 kb                    8.83 kb
+dist/foo.1.js        5.24 kb                     1.64 kb
+```
+
+现在用户在该页面上只需要引入 Vue 和这个入口文件即可：
+
+```html
+<script src="https://unpkg.com/vue"></script>
+<script src="path/to/foo.min.js"></script>
+
+<!-- foo-one 的实现的 chunk 会在用到的时候自动获取 -->
+<foo-one></foo-one>
+```
+
+#### 13.4 在构建时使用 vuex
+
+在构建 [Web Components 组件](https://cli.vuejs.org/zh/guide/build-targets.html#web-components-组件)或[库](https://cli.vuejs.org/zh/guide/build-targets.html#库)时，入口点不是 `main.js` ，而是 `entry-wc.js` 文件，该文件由此生成： https://github.com/vuejs/vue-cli/blob/dev/packages/%40vue/cli-service/lib/commands/build/resolveWcEntry.js
+
+因此，要在 Web Components 组件的目标中使用 vuex ，你需要在 `App.vue` 中初始化存储 (store):
+
+```js
+import store from './store'
+
+// ...
+
+export default {
+  store,
+  name: 'App',
+  // ...
+}
+```
+
+## 14. 部署
+
+如果你用 Vue CLI 处理静态资源并和后端框架一起作为部署的一部分，那么你需要的仅仅是确保 Vue CLI 生成的构建文件在正确的位置，并遵循后端框架的发布方式即可。
+
+如果你独立于后端部署前端应用——也就是说后端暴露一个前端可访问的 API，然后前端实际上是纯静态应用。那么你可以将 `dist` 目录里构建的内容部署到任何静态文件服务器中，但要确保正确的 [publicPath](https://cli.vuejs.org/zh/config/#publicpath)
+
+### 14.1 本地预览
+
+`dist` 目录需要启动一个 HTTP 服务器来访问 (除非你已经将 `publicPath` 配置为了一个相对的值)，所以以 `file://` 协议直接打开 `dist/index.html` 是不会工作的。在本地预览生产环境构建最简单的方式就是使用一个 Node.js 静态文件服务器，例如 [serve](https://github.com/zeit/serve)：
+
+```bash
+npm install -g serve
+# -s 参数的意思是将其架设在 Single-Page Application 模式下
+# 这个模式会处理即将提到的路由问题
+serve -s dist
+```
+
+### 14.2 使用 `history.pushState` 的路由
+
+如果你在 `history` 模式下使用 Vue Router，是无法搭配简单的静态文件服务器的。例如，如果你使用 Vue Router 为 `/todos/42/` 定义了一个路由，开发服务器已经配置了相应的 `localhost:3000/todos/42` 响应，但是一个为生产环境构建架设的简单的静态服务器会却会返回 404。
+
+为了解决这个问题，你需要配置生产环境服务器，将任何没有匹配到静态文件的请求回退到 `index.html`。Vue Router 的文档提供了[常用服务器配置指引](https://router.vuejs.org/zh/guide/essentials/history-mode.html)
+
+### 14.3 CORS
+
+如果前端静态内容是部署在与后端 API 不同的域名上，你需要适当地配置 [CORS](https://developer.mozilla.org/zh-CN/docs/Web/HTTP/Access_control_CORS)
+
+### 14.4 PWA
+
+如果你使用了 PWA 插件，那么应用必须架设在 HTTPS 上，这样 [Service Worker](https://developer.mozilla.org/zh-CN/docs/Web/API/Service_Worker_API) 才能被正确注册
+
+### 14.5 GitHub Pages
+
+1. 在 `vue.config.js` 中设置正确的 `publicPath`。
+
+   如果打算将项目部署到 `https://<USERNAME>.github.io/` 上, `publicPath` 将默认被设为 `"/"`，你可以忽略这个参数。
+
+   如果打算将项目部署到 `https://<USERNAME>.github.io/<REPO>/` 上 (即仓库地址为 `https://github.com/<USERNAME>/<REPO>`)，可将 `publicPath` 设为 `"/<REPO>/"`。举个例子，如果仓库名字为“my-project”，那么 `vue.config.js` 的内容应如下所示：
+
+   ```js
+   module.exports = {
+     publicPath: process.env.NODE_ENV === 'production'
+       ? '/my-project/'
+       : '/'
+   }
+   ```
+
+2. 在项目目录下，创建内容如下的 `deploy.sh` (可以适当地取消注释) 并运行它以进行部署
+
+   ```bash
+   #!/usr/bin/env sh
+   
+   # 当发生错误时中止脚本
+   set -e
+   
+   # 构建
+   npm run build
+   
+   # cd 到构建输出的目录下 
+   cd dist
+   
+   # 部署到自定义域域名
+   # echo 'www.example.com' > CNAME
+   
+   git init
+   git add -A
+   git commit -m 'deploy'
+   
+   # 部署到 https://<USERNAME>.github.io
+   # git push -f git@github.com:<USERNAME>/<USERNAME>.github.io.git master
+   
+   # 部署到 https://<USERNAME>.github.io/<REPO>
+   # git push -f git@github.com:<USERNAME>/<REPO>.git master:gh-pages
+   
+   cd -
+   ```
+
+### 14.6 Doker(Nginx)
+
+在 Docker 容器中使用 Nginx 部署你的应用。
+
+1. 安装 [Docker](https://www.docker.com/get-started)
+
+2. 在项目根目录创建 `Dockerfile` 文件
+
+   ```dockerfile
+   FROM node:10
+   COPY ./ /app
+   WORKDIR /app
+   RUN npm install && npm run build
+   
+   FROM nginx
+   RUN mkdir /app
+   COPY --from=0 /app/dist /app
+   COPY nginx.conf /etc/nginx/nginx.conf
+   ```
+
+3. 在项目根目录创建 `.dockerignore` 文件
+
+   设置 `.dockerignore` 文件能防止 `node_modules` 和其他中间构建产物被复制到镜像中导致构建问题。
+
+   ```text
+   **/node_modules
+   **/dist
+   ```
+
+4. 在项目根目录创建 `nginx.conf` 文件
+
+   `Nginx` 是一个能在 Docker 容器中运行的 HTTP(s) 服务器。它使用配置文件决定如何提供内容、要监听的端口等。参阅 [Nginx 设置文档](https://www.nginx.com/resources/wiki/start/topics/examples/full/) 以了解所有可能的设置选项。
+
+   下面是一个简单的 `Nginx` 设置文件，它会在 `80` 端口上提供你的 Vue 项目。`页面未找到` / `404` 错误使用的是 `index.html`，这让我们可以使用基于 `pushState()` 的路由。
+
+   ```text
+   user  nginx;
+   worker_processes  1;
+   error_log  /var/log/nginx/error.log warn;
+   pid        /var/run/nginx.pid;
+   events {
+     worker_connections  1024;
+   }
+   http {
+     include       /etc/nginx/mime.types;
+     default_type  application/octet-stream;
+     log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                       '$status $body_bytes_sent "$http_referer" '
+                       '"$http_user_agent" "$http_x_forwarded_for"';
+     access_log  /var/log/nginx/access.log  main;
+     sendfile        on;
+     keepalive_timeout  65;
+     server {
+       listen       80;
+       server_name  localhost;
+       location / {
+         root   /app;
+         index  index.html;
+         try_files $uri $uri/ /index.html;
+       }
+       error_page   500 502 503 504  /50x.html;
+       location = /50x.html {
+         root   /usr/share/nginx/html;
+       }
+     }
+   }
+   ```
+
+5. 构建你的 Docker 镜像
+
+   ```bash
+   docker build . -t my-app
+   # Sending build context to Docker daemon  884.7kB
+   # ...
+   # Successfully built 4b00e5ee82ae
+   # Successfully tagged my-app:latest
+   ```
+
+6. 运行你的 Docker 镜像
+
+   这个例子基于官方 `Nginx` 镜像，因此已经设置了日志重定向并关闭了自我守护进程。它也提供了其他有利于 Nginx 在 Docker 容器中运行的默认设置。更多信息参阅 [Nginx Docker 仓库](https://hub.docker.com/_/nginx)。
+
+   ```bash
+   docker run -d -p 8080:80 my-app
+   curl localhost:8080
+   # <!DOCTYPE html><html lang=en>...</html>
+   ```
+
+### Reference
 
 1. [vue-cli](https://cli.vuejs.org/zh/guide/cli-service.html) vue docs
