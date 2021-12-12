@@ -15,6 +15,13 @@ publish: false
 - 文章的添加，删除，修改和查询
 - Markdown 格式文章的展示
 
+开发环境：
+
+- OS: 5.10.79-1-MANJARO
+- Database: 10.6.5-MariaDB Arch Linux
+- Golang: 1.17
+- Node: 16.11.1
+
 ## 1. Frontend
 
 前端项目将以 [PanJiaChen](https://github.com/PanJiaChen)/**[vue-admin-template](https://github.com/PanJiaChen/vue-admin-template)**作为模板进行创建
