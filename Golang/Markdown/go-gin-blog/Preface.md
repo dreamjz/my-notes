@@ -24,7 +24,7 @@ publish: false
 
 ## 1. Frontend
 
-前端项目将以 [PanJiaChen](https://github.com/PanJiaChen)/**[vue-admin-template](https://github.com/PanJiaChen/vue-admin-template)**作为模板进行创建
+前端项目将以 [PanJiaChen](https://github.com/PanJiaChen)/[vue-admin-template](https://github.com/PanJiaChen/vue-admin-template)作为模板进行创建
 
 **目录结构**
 
@@ -83,22 +83,12 @@ go-gin-example
 ```
 
 - api : 路由处理逻辑
-- conf : 用于存储配置文件
+- config : 用于存储配置文件
 - middleware : 应用中间件
 - models : 应用数据库模型
-- global : 全局变量，viper, gorm 等
+- global : 全局变量
 - routers : 路由逻辑处理
-- runtime : 应用运行时数据
-- core : 应用核心组件
 - service : 业务服务层
 - dao : 数据库访问层
 - utils : 工具包
-
-将 request 和 response 封装起来，取代简单的 map
-
-## 链接
-
-1. [eddycjy](https://github.com/eddycjy)/**[go-gin-example](https://github.com/eddycjy/go-gin-example)** github repo
-
-2. [eddycjy](https://github.com/eddycjy)/**[blog](https://github.com/eddycjy/blog)** 煎鱼 blog
 
