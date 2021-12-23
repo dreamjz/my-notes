@@ -43,7 +43,7 @@ import "google/protobuf/timestamp.proto";
 The `go_package` option defines the import path of the package which will contain all the generated code for this file. The Go package name will be the last path component of the import path. For example, our example will use a package name of “tutorialpb”.
 
 ```protobuf
-option go_pacakge = "." // 这里将生成的 go 文件和 proto 文件放在同一目录下
+option go_pacakge = "../protobuffers" // 这里将生成的 go 文件和 proto 文件放在同一目录下 
 ```
 
 Next, you have your message definitions. A message is just an aggregate containing a set of typed fields. Many standard simple data types are available as field types, including `bool`,`int32`, `double`, and `string`. You can also add further structure to your messages by using other message types as field types.
@@ -171,5 +171,18 @@ if err := proto.Unmarshal(in, book); err != nil {
 
 ## 7. Extending a Protocol Buffer
 
-Sooner or later after you release the code that uses your protocol buffer, you will undoubtedly want to “improve” the protocol buffer’s definition.
+Sooner or later after you release the code that uses your protocol buffer, you will undoubtedly want to “improve” the protocol buffer’s definition. If you want your new buffers to be backwards-compatible, and your old buffers to be forward-compatible - and you almost certainly do want this - then there are some rules you need to follow. In the new version of the protocol buffer: 
 
+- you *must* do not change the tag numbers of any existing fields
+- you *may* delete fields
+- you *may* add new fields but you must use fresh tag numbers (i.e. tag numbers that were never used in this protocol buffer, not even by deleted fields)
+
+(There are [some exceptions](https://developers.google.com/protocol-buffers/docs/proto3#updating) to these rules, but they are rarely used.)
+
+If you follow these rules, old code will happily read new messages and simply ignore any new fields. To the old code, singular fields that were deleted will simply have their default value, and deleted repeated fields will be empty. New code will also transparently read old messages.
+
+However, keep in mind that new fields will not be present in old messages, so you will need to do something reasonable with the default value. A type-specific default value is used: for strings, the default value is empty string. For booleans, the default value is false. For numeric types, the default value is zero.
+
+### Reference
+
+1. [Basics: Go](https://developers.google.com/protocol-buffers/docs/gotutorial) protocol buffer tutorial
