@@ -43,7 +43,7 @@ import "google/protobuf/timestamp.proto";
 The `go_package` option defines the import path of the package which will contain all the generated code for this file. The Go package name will be the last path component of the import path. For example, our example will use a package name of “tutorialpb”.
 
 ```protobuf
-option go_pacakge = "../protobuffers" // 这里将生成的 go 文件和 proto 文件放在同一目录下 
+option go_pacakge = "protobuffers" // 这里将生成的 go 文件和 proto 文件放在同一目录下 
 ```
 
 Next, you have your message definitions. A message is just an aggregate containing a set of typed fields. Many standard simple data types are available as field types, including `bool`,`int32`, `double`, and `string`. You can also add further structure to your messages by using other message types as field types.
