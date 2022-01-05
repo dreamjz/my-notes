@@ -290,3 +290,136 @@ client := pb.NewRouteGuideClient(conn)
 
 ### 6.2 Calling service methods
 
+Now let’s look at how we call our service methods. Note that in gRPC-Go, RPCs operate in a blocking/synchronous mode, which means that the RPCd call waits for the server to respond, and will either return a response or an error.
+
+### 6.3 Simple RPC
+
+Calling the simple RPC `GetFeature` is nearly as straightforward as calling a local method.
+
+```go
+feature, err := client.GetFeature(context.Background(),&pb.Point{409146138, -746188906})
+if err != nil {
+    ...
+}
+```
+
+As you can see, we call the method on the stub we got earlier. In our method parameters we create and populate a request protocol buffer object (in our case `Point`). We also pass a `context.Context` Object which lets us change our RPC’s behavior if necessary, such as time-out/cancel an RPC in flight. If the call doesn’t return an error, then we can read the response information from the server from the first return value.
+
+### 6.4 Server-side streaming RPC
+
+Here’s where we call the server-side streaming method `ListFeatures`, which returns a stream of geographical `Feature`s. If you’ve already read Creating the server some of this may look very familiar - streaming RPCs are implemented in a similar way on both side.
+
+```go
+rect := &pb.Rectangle{...} // initialize a pb.Rectangle
+stream, err := client.ListFeatures(context.Background(),rect)
+if err != nil {
+    ...
+}
+for {
+    feature, err := stream.Recv()
+    if err == io.EOF {
+        break
+    }
+    if err != nil {
+        log.Fatalf("%v.ListFeatures(_) = _, %v",client, err)
+    }
+    log.Println(feature)
+}
+```
+
+As in the simple RPC, we pass the method a context  and a request. However, instead of getting a response object back, we get back an instance of `RouteGuide_ListFeaturesClient`. The Client can use the `RouteGuide_ListFeaturesClient` stream to read the server’s response.
+
+We use the `RouteGuide_ListFeaturesClient`'s' `Recv()` method to repeatedly read in the server’s response to a response protocol buffer object (in this case a `Feature`) until there are no more messages: the client needs to check the error `err` returned from `Recv()` after each call; if it’s `io.EOF` then the message stream has ended; otherwise there must be an RPC error, which is passed over through `err`.
+
+### 6.5 Client-side streaming RPC
+
+The client-side streaming method `RecordRoute` is similar to the server-side method, except that we only pass the method a context and get a `RouteGuide_RecordRouteClient` stream back, which we can use to both write and read messages.
+
+```go
+// Create a random number of random points
+r := rand.New(rand.NewSource(time.Now().UnixNano()))
+pointCount := int(r.Int31n(100)) + 2 // Traverse at least two points
+var points []*pb.Point
+for i := 0; i < pointCount; i++ {
+    points = append(points,randomPoint(r))
+}
+log.Printf("Traversing %d points.",len(points))
+stream, err := client.RecordRoute(context.Background())
+if err != nil {
+    log.Fatalf("%v.RecordRoute(_) = _, %v"),client, err)
+}
+for _, point := range points {
+    if err := stream.Send(point); err != nil {
+        log.Fatalf("%v.Send(%v) = %v",stream, point, err)
+    }
+}
+reply, err := stream.CloseAndRecv()
+if err != nil {
+    log.Fatalf("%v.CloseAndRecv() got error %v, want %v",stream, err, nil)
+}
+log.Printf("Route summary: %v",reply)
+```
+
+The `RouteGuide_RecordRouteClient` has a `Send()` method that we can use to send requests to the server. Once we have finished writing our client’s requests to the stream using `Send()`, we need to call `CloseAndRecv()` on the stream to let gRPC know that we’ve finished writing and are expecting to receive a response. We get our RPC status from the `err` returned from `CloseAndRecv()` . if the status is `nil`, then the first return value from `CloseAndRecv()` will be a valid server response.
+
+### 6.6 Bidirectional streaming RPC
+
+Finally, let’s look at our bidirectional streaming RPC `RouteChat()`. As in the case of `RecordRoute`, we only pass the method a context object and get back a stream that we can use to both write and read messages. However, this time we return values via our method’s stream while the server is still writing messages to their message stream.
+
+```go
+stream, err := client.RouteChat(context.Background())
+waitc := make(chan struct{})
+go func() {
+    for {
+        in, err := stream.Recv()
+        if err == io.EOF {
+            // read done
+            close(waitc)
+            return 
+        }
+        if err != nil {
+            log.Fatalf("Failed to receive a note: %v",err)
+        }
+        log.Printf("Got message %s at point(%d,%d)",in.Message, in.Location.Latitude, in.Location.Longitude)
+    } 
+}()
+for _, note := range notes {
+    if err := stream.Send(note); err != nil {
+        log.Fatalf("Failed to send a note: %v", err)
+    }
+}
+stream.CloseSend()
+<- waitc
+```
+
+The syntax for reading and writing here is very similar to client-side streaming method, except we use the stream’s `CloseSend()` method once we’ve finished our call. Although each side will always get the other’s messages in the order they were written, both the client and server can read and write in any order -- the streams operate completely independently.
+
+## 7. Try it out
+
+1. Run the server:
+
+   ```sh
+   $ go run server/server.go -json_db_file ../testdata/route_guide_db.json
+   ```
+
+2. Run the client:
+
+   ```sh
+   $ go run client/client.go
+   ...
+   2022/01/05 17:28:59 Traversing 34 points.
+   2022/01/05 17:28:59 Route summary: point_count:34
+   2022/01/05 17:28:59 Got message First message at point (0, 1)
+   2022/01/05 17:28:59 Got message Second message at point (0, 2)
+   2022/01/05 17:28:59 Got message Third message at point (0, 3)
+   2022/01/05 17:28:59 Got message First message at point (0, 1)
+   2022/01/05 17:28:59 Got message Fourth message at point (0, 1)
+   2022/01/05 17:28:59 Got message Second message at point (0, 2)
+   2022/01/05 17:28:59 Got message Fifth message at point (0, 2)
+   2022/01/05 17:28:59 Got message Third message at point (0, 3)
+   2022/01/05 17:28:59 Got message Sixth message at point (0, 3)
+   ```
+
+## Reference
+
+1. [Basic Tutorial](https://grpc.io/docs/languages/go/basics/) gRPC docs
