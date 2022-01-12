@@ -108,7 +108,7 @@ M (Thread) 想要执行、放回 G (goroutine) 必须访问全局 G 队列，并
 
 ## 2. GMP 模型设计思想 
 
-为了解决之前的问题，Go 设计了新的调度器，除了 M (Thread) 和 G (goroutine) 外，引进了 P (Processor)。
+为了解决之前的问题，Go 设计了新的调度器，除了 M (Machine, 实际上为 Thread) 和 G (goroutine) 外，引进了 P (Processor)。
 
 ![](image/zaZ4nQYcZe.png!large)
 
@@ -165,10 +165,164 @@ P 和 M 的数量之前没有绝对关系，一个 M 阻塞了，P 就会创建�
 1. `go func()` 创建一个 goroutine
 2. 由两个存储 G 的队列，一个是局部调度器 P 的本地队列，一个是全局 G 队列。新创建的 G 会先保存在 P 的本地队列中，若 P 的本地队列已经满了就会保存在全局的队列中
 3. G 只能运行在 M 中，一个 M 必须持有一个 P, M 与 P 是 1:1 的关系。M 与 P 是 1:1 的关系。M 会从 P 的本地队列弹出一个可执行状态的 G 来执行，如果 P 的本地队列为空，就会从其他的 MP 组合中偷取可执行的 G。
-3. 一个 M 调度 G 执行对的过程是一个循环机制
-3. 当 M 执行某一个 G 时若发生了 `syscall` 或则其余阻塞操作，
+4. 一个 M 调度 G 执行对的过程是一个循环机制
+5. 当 M 执行某一个 G 时若发生了 `syscall` 或则其余阻塞操作，M 会阻塞，若当前有一些 G 在执行，`runtime` 会将此线程 M 从 P 中摘除(detach), 然后再创建一个新的操作系统线程（若有空闲线程则服用）来服务这个 P。
+6. 当 M 系统调用结束时，这个 G 会尝试获取一个空闲的 P 执行，并放入到这个 P 的本地队列。若获取不到 P，那么这个线程 M 编程休眠状态，加入到空闲线程中，然后这个 G 会被放入全局队列中。
 
+### 2.4 调度器的生命周期
 
+![](image/j37FX8nek9.png!large)
+
+上图中出现的特殊的 M 和 G:
+
+- **M0**: 启动程序后的编号为 0 的主线程，这个 M 对应的实例会在全局变量 `runtime.m0` 中，不需要在 heap 上分配，M0 负责执行初始化操作和启动第一个 G，在之后 M0 就和其他的 M 一样了。
+- **G0**: 每次启动一个 M 都会第一个创建的 goroutine， G0 仅用于负责调度的 G，G0 不指向任何可执行的函数，每个 M 都会有一个自己的 G0。在调度或系统调用时会使用 G0 的栈空间，全局变量的 G0 是 M0 的 G0。
+
+下面追踪一段代码：
+
+```go
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hello world")
+}
+```
+
+- `runtime` 创建最初的线程 `M0` 和 goroutine `g0` , 并关联二者
+- 调度器初始化，初始化 M0, 栈，GC 以及有 GOMAXPROCS 个 P 构成的列表
+- 示例代码中的 main 函数 `main.main`, `runtime` 中也有一个 main 函数 `runtime.main`，代码经过编译后，`runtime.main` 会调用 `main.main` ，程序启动时会为 `runtime.main` 创建 goroutine，称其为主协程，然后将主协程加入 P 的本地队列。
+- 启动 M0，M0 已经绑定了 P, 会从 P 的本地队列获取 G，此例中获取到主协程
+- G 拥有栈内存，M 根据 G 中的栈信息和调度信息设置运行环境
+- M 执行 G 
+- G 退出，再次回到 M，M 会再次尝试获取 G ，如此重复下去直到 `main.main` 退出，`runtime.main`  会执行 Defer 和 Panic 处理，或者调用 `runtime.exit` 退出
+
+调度器的生命周期几乎占满了 Go 程序的一生， `runtime.main` 的 goroutine 执行之前都是为调度器做准备工作，`runtime.main`  的 goroutine 的运行才是调度器真正的开始，直到 `runtime.main`  的结束。
+
+### 2.5 可视化 GMP
+
+#### 2.5.1 go tool trace
+
+trace 工具可以记录运行时信息，能提供可视化的 Web 页面
+
+以下是简单的测试代码，创建 trace （会运行在独立的 goroutine 中），然后 main 打印 “Hello World” 退出：
+
+```go
+package main
+
+import (
+	"fmt"
+	"log"
+	"os"
+	"runtime/trace"
+)
+
+func main() {
+	// create trace file
+	f, err := os.OpenFile("trace.out", os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		log.Fatalf("failed to create trace file: %v", err)
+	}
+	// remember to close
+	defer f.Close()
+
+	// start trace goroutine
+	err = trace.Start(f)
+	if err != nil {
+		log.Fatalf("failed to start trace: %v", err)
+	}
+	// remember to stop
+	defer trace.Stop()
+
+	// main
+	fmt.Println("Hello World")
+}
+```
+
+执行程序会生成 `trace.out`，使用 trace 工具分析文件就可以在浏览器访问了
+
+```sh
+$ go tool trace trace.out
+2022/01/12 21:57:41 Parsing trace...
+2022/01/12 21:57:41 Splitting trace...
+2022/01/12 21:57:41 Opening browser. Trace viewer is listening on http://127.0.0.1:37259
+```
+
+在首页点击 `view trace  ` 即可看到可视化的调度流程
+
+![image-20220112221549447](image/image-20220112221549447.png)
+
+![](image/vYyO9YJmam.png!large)
+
+**G 信息**
+
+点击 Gotoutine 的一段条形图，可以看到
+
+![image-20220112221803958](image/image-20220112221803958.png)
+
+其中 G0 为每个 M 一定会有的初始化的 G，而 G1 就是执行中的主协程了，在所选的这段时间中处于可运行和运行态。
+
+**M 信息**
+
+点击 Threads 的一段可以看到：
+
+![image-20220112222138530](image/image-20220112222138530.png)
+
+其中 M0 是初始化的 M0，而 M1 是用于执行主协程 G1 的线程
+
+**P 信息**
+
+![image-20220112222432548](image/image-20220112222432548.png)
+
+G1 中调用了  `main.main` ， 创建了 `trace goroutine` G6。 G1 运行于 P0 上，G6 运行在 P1 上， 由于 M 和 P 是一一绑定的，这是看下 M 的信息会发现新的线程 M2 执行G6。
+
+![image-20220112222824759](image/image-20220112222824759.png)
+
+#### 2.5.2 debug trace
+
+ 下面利用 debug 的形式来进行跟踪
+
+````go
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+func main() {
+	for i := 0; i < 5; i++ {
+		time.Sleep(1 * time.Second)
+		fmt.Println("Hello World")
+	}
+}
+````
+
+```sh
+$ go build -o trace ./trace.go
+$ GODEBUG=schedtrace=1000 ./trace
+GODEBUG=schedtrace=1000 ./trace
+SCHED 0ms: gomaxprocs=16 idleprocs=13 threads=5 spinningthreads=1 idlethreads=0 runqueue=0 [1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+Hello World
+SCHED 1005ms: gomaxprocs=16 idleprocs=16 threads=5 spinningthreads=0 idlethreads=3 runqueue=0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+Hello World
+SCHED 2006ms: gomaxprocs=16 idleprocs=16 threads=5 spinningthreads=0 idlethreads=3 runqueue=0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+Hello World
+SCHED 3007ms: gomaxprocs=16 idleprocs=16 threads=5 spinningthreads=0 idlethreads=3 runqueue=0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+Hello World
+SCHED 4009ms: gomaxprocs=16 idleprocs=16 threads=5 spinningthreads=0 idlethreads=3 runqueue=0 [0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]
+Hello World
+```
+
+- `SCHED`: 调试信息输出标志字符串，代表本行为 goroutine 调度器的输出
+- `1005ms`: 为程序启动到输出日志的时间
+- `gomaxprocs`: P 的数量，本例中为 16， 因为 gomaxprocs 默认与 CPU 的核心数量一致
+- `idleprocs`: 处于空闲状态的 P 的数量
+- `thread`: 线程数
+- `spiningthreads`: 自旋线程数，当 M 在本地队列，全局运行队列中找不到 G 则可以认为 M 正在自旋，也就是说 M 进入了循环寻找可运行 G 的状态
+- `runqueue`: Scheduler 全局队列中的 G 数量
+- `[[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]]`:  各个 P 中本地队列的 G 数量
 
 ## Reference
 
