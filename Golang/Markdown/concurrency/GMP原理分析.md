@@ -324,6 +324,74 @@ Hello World
 - `runqueue`: Scheduler 全局队列中的 G 数量
 - `[[0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0]]`:  各个 P 中本地队列的 G 数量
 
+## 3. 调度器场景解析
+
+### 3.1 G1 创建 G2
+
+P 拥有 G1，M1 获取 P 后开始运行 G1，G1 使用 `go func()` 创建 G2，为了保证局部性 G2 优先加入到 P1 的本地队列。
+
+![](image/Pm8LOYcsWQ.png!large)
+
+### 3.2 本地队列执行
+
+G1 运行完成后 （`goexit` 函数），M 上运行的 goroutine 切换为 G0， G0 负责调度时协程的切换（`schedule` 函数）。从 P 的本地队列获取 G2，从 G0 切换到 G2，并开始运行 G2（`execute` 函数）。实现了线程 M1 的复用。
+
+![](image/JWDtmKG3rK.png!large)
+
+### 3.3 本地队列容量已满
+
+假设每个 P 的队列长度为 3，G2 在运行时创建了 6 个 G，前 3 G（G3，G4，G5）已经加入 P1 的队列，此时 P1 的容量已满。
+
+![](image/UpjRxzIBd3.png!large)
+
+### 3.4 负载均衡
+
+紧接着上面的场景，G2 创建 G7 时，P1 的本地队列已满，需要执行 **负载均衡**（将 P1 中本地队列中前一半的 G 以及新创建的 G **转移** 至全局队列。实际上 不一定是新的 G，如果 G 在 G2 之后就会执行，就会被保存在本地队列，而已存在的 G 会被移动到全局队列）
+
+![](image/chqTgsiuWi.png!large)
+
+移动至全局队列时，G 的顺序会被打乱，此时加入队列的顺序为 G3 G7 G4。
+
+### 3.5 本地队列容量未满
+
+G2 创建 G8 时，P1 的本地队列未满，所以 G8 会被 **优先** 加入到 P1 的本地队列。
+
+![](image/nukEY92G6D.png!large)
+
+### 3.6 唤醒正在休眠的 M
+
+**在创建 G 时，运行的 G 会尝试唤醒休眠的 P M 组合**
+
+假设 G2 唤醒了 M2（和 P2 绑定），此时 M2 会运行 G0，但 P2 队列没有 G，此时 M2 就处于 **自旋** 状态（没有可运行 G 但处于运行状态，不断寻找 G）。
+
+![](image/2FWNXSuHfX.png!large)
+
+### 3.7 从全局队列中获取 G
+
+M2 尝试从全局队列（GQ）取一批 G 放入 P2 的本地队列（函数：`findrunnable()`）,M2 从全局队列取的 G 数量满足下列公式：
+
+```
+n = min( len(GQ)/GOMAXPROCS + 1, len(GQ/2) ) 
+```
+
+至少从 GQ 中获取一个 G，但不会一次获取过多的 G 到 P 的本地队列，这时 **全局队列到 P 本地队列的负载均衡**。
+
+![](image/0fn8DGqI8N.jpeg!large)
+
+假设场景中一共有 4 个 P （ `GOMAXPROCS ` 为 4 ），所以 M2 只能从全局队列取 1 个 G （G3）移动到 P2 本地队列，然后完成 G0 到 G3 的切换，运行 G3。
+
+### 3.8 从 P 的本地队列中偷取 G (work stealing)
+
+假设 G2 一直在 M1 上运行，经过 2 轮之后， M2 已经把 G7, G4 从全局队列中获取并完成运行，全局队列和 P2 的本地队列均已无可运行 G，如下图左半部分所示：
+
+![](image/qn1NRMLqnp.png!large)
+
+全局队列已经没有 G, 那么 M 就会执行 work stealing, 从其他持有 G 的 P 中偷取一半 G 放入自己的 P 本地队列。上图右半部分， M2 从 M1 的 P1 本地队列获取 G8 来运行。
+
+### 3.9 自旋线程
+
+
+
 ## Reference
 
 1. [Golang 调度器 GMP 原理与调度全分析](https://learnku.com/articles/41728)   [Aceld](https://learnku.com/blog/Aceld)
