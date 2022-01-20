@@ -51,7 +51,33 @@ sync.Pool 在初始化时，需要用户提供对象的构造函数 `New`, 用�
 
 在 Golang 的 GMP 模型中， M(Machine) 代表系统线程，在同一时间一个 M 上只能运行一个 P。那么从线程的维度上看，在 P 上的逻辑都是单线程执行的（串行）。
 
+ `sync.Pool` 充分利用了 GMP 这一特点。对于同一个 `sync.Pool`, 每个 P 都有自己的本地对象池 `poolLocal`，如下图所示：
 
+![](image/sync_pool.png)
+
+`sync.Pool` 的代码定义如下：
+
+```go
+type Pool struct {
+	noCopy noCopy
+
+	local     unsafe.Pointer // local fixed-size per-P pool, actual type is [P]poolLocal
+	localSize uintptr        // size of the local array
+
+	victim     unsafe.Pointer // local from previous cycle
+	victimSize uintptr        // size of victims array
+
+	// New optionally specifies a function to generate
+	// a value when Get would otherwise return nil.
+	// It may not be changed concurrently with calls to Get.
+	New func() interface{}
+}
+```
+
+其中需要关注三个字段：
+
+- `local` ： 长度为 P 的个数的数组，元素类型为 `poolLocal`。存储各个 P 对应的本地对象池，可以看做 `[P]poolLocal`
+- `localSize`: 代表 local 数组的长度。
 
 ## Reference
 
