@@ -104,6 +104,31 @@ publish: true
 
 
 
+## 5. 双指针技巧
+
+通常迭代数组仅需一个指针即可，但有时需要使用两个指针进行迭代。
+
+![1.png](image/bfdf27723d1b26ee06a56adbf6206fb9d1f7446e297ce05e74e0275b268cd945-1.png)
+
+示例：反转数组
+
+```go
+func reverseString(s string) string {
+	b := []byte(s)
+	left, right := 0, len(b)-1
+	for left < right {
+		b[left], b[right] = b[right], b[left]
+		left++
+		right--
+	}
+	return string(b)
+}
+```
+
+左右两边的指针向中间移动，交换彼此的值，直到两者相遇。
+
+![2.gif](image/84f9f1fce23655fcc653179b26d9800edf54858f790be1bc7573eb228f2aac00-2.gif)
+
 ## Reference
 
 1. [字符串和数组](https://leetcode-cn.com/leetbook/read/array-and-string/xkhi75/)
