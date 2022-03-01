@@ -75,7 +75,7 @@ func searchInsert(nums []int, target int) int {
 
 时间复杂度：O(logn)，其中 n 为数组的长度。二分查找所需的时间复杂度为 O(logn)。
 
-空间复杂度：O(1)O(1)。我们只需要常数空间存放若干变量。
+空间复杂度：*O(1)*,我们只需要常数空间存放若干变量。
 
 ## Reference
 
