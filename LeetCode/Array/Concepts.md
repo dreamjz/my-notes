@@ -102,7 +102,70 @@ publish: true
 
 ## 4. 字符串
 
+字符串是由零个或多个字符组成的有限序列，一般记为 s=a~1~a~2~...a~n~ d, 在编程语言中表示文本的数据类型。
 
+字符串的基本操作对象通常是**字符串整体或者子串**，例如: 将 `I like leetcode` 翻转之后的 `edocteel ekil I` 通常是没有意义的，一般希望输出的是`Leetcode like I`。
+
+### 4.1 比较函数
+
+在 golang 中字符串可以使用运算符直接比较，也可以使用`strings.Compare(a, b string) int ` 进行比较
+
+```go
+	// built-in operator
+	of := "%s %s %s : %v\n"
+	s1, s2 := "abc", "def"
+	fmt.Printf(of,s1,"==",s2,s1==s2)
+	fmt.Printf(of,s1,"<=",s2,s1<=s2)
+	fmt.Printf(of,s1,">=",s2,s1>=s2)
+	fmt.Printf(of,s1,"<",s2,s1<s2)
+	fmt.Printf(of,s1,">",s2,s1>s2)
+	// strings.Compare
+	fmt.Printf("%s compare to %s : %v",s1,s2, strings.Compare(s1,s2))
+```
+
+```
+abc == def : false
+abc <= def : true
+abc >= def : false
+abc < def : true
+abc > def : false
+abc compare to def : -1
+```
+
+对于`strings.Compare`:
+
+```go
+// Compare returns an integer comparing two strings lexicographically.
+// The result will be 0 if a==b, -1 if a < b, and +1 if a > b.
+//
+// Compare is included only for symmetry with package bytes.
+// It is usually clearer and always faster to use the built-in
+// string comparison operators ==, <, >, and so on.
+func Compare(a, b string) int {
+	// NOTE(rsc): This function does NOT call the runtime cmpstring function,
+	// because we do not want to provide any performance justification for
+	// using strings.Compare. Basically no one should use strings.Compare.
+	// As the comment above says, it is here only for symmetry with package bytes.
+	// If performance is important, the compiler should be changed to recognize
+	// the pattern so that all code doing three-way comparisons, not just code
+	// using strings.Compare, can benefit.
+	if a == b {
+		return 0
+	}
+	if a < b {
+		return -1
+	}
+	return +1
+}
+```
+
+`strings.Compare`函数只是为了和`bytes`包对称，使用内建的操作符性能要更好，并且函数本身也是用了内建操作符进行计算，故不建议使用此函数进行字符串比较。
+
+### 4.2 拼接函数
+
+某些语言(如 C++) 中字符串是可变的，可以像改变数组元素那样修改字符串。
+
+在字符串不可变的语言中，想要修改字符串则需要创建新的字符串。
 
 ## 5. 双指针技巧
 
