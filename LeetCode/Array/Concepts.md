@@ -195,3 +195,4 @@ func reverseString(s string) string {
 ## Reference
 
 1. [字符串和数组](https://leetcode-cn.com/leetbook/read/array-and-string/xkhi75/)
+1. [Golang 字符串拼接方式比较](https://segmentfault.com/a/1190000040275250)
