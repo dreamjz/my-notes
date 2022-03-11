@@ -316,7 +316,43 @@ j 需要移动的位数 k = j - next[j]，那么 j 在模式串移动了 k 位�
 将上面的计算方式写成 Code：
 
 ```go
+func buildNext(p string) []int {
+    n := len(p)
+    next := make([]int, n)
+    j, k := 0, -1
+    next[j] = k
+    for j < n-1 {
+        if k == -1 || p[j] == p[k] {
+            j++
+            k++
+            next[j] = k // next[j+1]=next[j]+1
+        } else {
+            k = next[k]
+        }
+    }
+}
+```
 
+KMP 算法：
+
+```go
+func kmp(s string, p string) int {
+    next := buildNext(p)
+    i, j := 0, 0
+    m, n := len(s), len(p)
+    for i < m && j < n {
+        if s[i] == s[j] {
+            i++
+            j++
+        } else {
+            j = next[j]
+        }
+    }
+    if j == n {
+        return i - j
+    }
+    return -1
+}
 ```
 
 ##   5. 双指针技巧
