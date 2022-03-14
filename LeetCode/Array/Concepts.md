@@ -357,6 +357,8 @@ func kmp(s string, p string) int {
 
 ##   5. 双指针技巧
 
+### 5.1 双指针
+
 通常迭代数组仅需一个指针即可，但有时需要使用两个指针进行迭代。
 
 ![1.png](image/bfdf27723d1b26ee06a56adbf6206fb9d1f7446e297ce05e74e0275b268cd945-1.png)
@@ -379,6 +381,48 @@ func reverseString(s string) string {
 左右两边的指针向中间移动，交换彼此的值，直到两者相遇。
 
 ![2.gif](image/84f9f1fce23655fcc653179b26d9800edf54858f790be1bc7573eb228f2aac00-2.gif)
+
+### 5.2 快慢指针
+
+快慢指针 指的是使用两个不同步的指针来解决问题，指针的移动方向相同。而上文提到的双指针的运动方向是相反的。
+
+示例：
+
+>一个数组 `nums` 和 值 `val`, 需要 **原地** 移除所有数值等于 `val` 的元素, 并返回移除后数组的新长度.
+
+1. 若没有空间复杂度的限制
+   可以创建一个新的数组, 将原数组中不等于 `val` 的值放入新数组即可.
+   ![3.png](image/3f8b23cdbbb25f753c89a309a2860081e0dbb7d7097a2664100849424b07235a-3.png)
+
+   ```go
+   func removeElement(nums []int, val int) int {
+       var arr []int
+       for _, v := range nums {
+           if v != val {
+               arr = append(arr, v)
+           }
+       }
+       return len(arr)
+   }
+   ```
+
+2.  若有空间限制
+   此时应在原数组上进行操作, 可以采用快慢指针的思想: 初始化一个快指针 `fast` 和一个慢指针  `slow`, `fast` 每次移动一步,而 `slow` 仅当 `fast` 指向的值不等于 `val` 时才移动一步.
+   ![4.gif](image/353657e00bf49ad5c6aeb8e97414d1d610083acdb580e7c2b0fe036a523129f5-4.gif)
+
+   ```go
+   func removeElement(nums []int, target int) int {
+       slow, fast := 0, 0
+       for fast <  len(nums) {
+           if nums[fast] != val {
+               nums[slow] = nums[fast]
+               slow++
+           }
+           fast++
+       }
+       return slow
+   }
+   ```
 
 ## Reference
 
