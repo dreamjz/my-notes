@@ -426,7 +426,5 @@ Go 的调度器轻量且简单，让 Go 具有原生的并发能力。**其本�
 
 ## Reference
 
-## Reference
-
 1. [Golang 调度器 GMP 原理与调度全分析](https://learnku.com/articles/41728)   [Aceld](https://learnku.com/blog/Aceld)
 2. [进程控制块](https://zh.wikipedia.org/wiki/%E8%A1%8C%E7%A8%8B%E6%8E%A7%E5%88%B6%E8%A1%A8) wikipedia
