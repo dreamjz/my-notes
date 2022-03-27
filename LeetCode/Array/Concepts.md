@@ -1,5 +1,5 @@
 ---
-title: "Concepts"
+title: "Array and String Concepts"
 date: '2022-02-23'
 categories:
  - leetcode
