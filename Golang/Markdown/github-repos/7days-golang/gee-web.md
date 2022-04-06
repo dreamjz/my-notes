@@ -323,7 +323,7 @@ func (c *Context) SetHeader(key, value string) {
 func (c *Context) String(code int, format string, values ...interface{}) {
 	c.SetHeader("Content-Type", "text-plain")
 	c.Status(code)
-	c.Writer.Write([]byte(fmt.Sprintf(format, values)))
+	c.Writer.Write([]byte(fmt.Sprintf(format, values...)))
 }
 
 // JSON set response with JSON format
@@ -357,9 +357,166 @@ func (c *Context) HTML(code int, html string) {
 
 #### Router
 
+将路由相关的方法和结构提取出来，放入新的文件 `router.go` 中，方便后续功能的增强，如动态路由支持等；将 `handle` 方法的参数改为 `Context` 类型。
+
+```go
+package gee
+
+import (
+	"log"
+	"net/http"
+)
+
+type router struct {
+	handlers map[string]HandlerFunc
+}
+
+func newRouter() *router {
+	return &router{handlers: make(map[string]HandlerFunc)}
+}
+
+func (r *router) addRoute(method, pattern string, handler HandlerFunc) {
+	log.Printf("Route %4s - %s", method, pattern)
+	key := method + "-" + pattern
+	r.handlers[key] = handler
+}
+
+func (r *router) handle(c *Context) {
+	key := c.Method + "-" + c.Path
+	if handler, ok := r.handlers[key]; ok {
+		handler(c)
+	} else {
+		c.String(http.StatusNotFound, "404 NOT FOUND: %s\n", c.Path)
+	}
+}
+
+```
+
 
 
 #### Gee
+
+
+
+```go
+package gee
+
+import "net/http"
+
+// HandlerFunc defines the request handler used by gee
+type HandlerFunc func(c *Context)
+
+// Engine implements the interface http.Handler
+type Engine struct {
+	router *router
+}
+
+// New is the constructor of gee.Engine
+func New() *Engine {
+	return &Engine{router: newRouter()}
+}
+
+func (e *Engine) addRoute(method, pattern string, handler HandlerFunc) {
+	e.router.addRoute(method, pattern, handler)
+}
+
+// GET defines the method to add GET request
+func (e *Engine) GET(pattern string, handler HandlerFunc) {
+	e.addRoute("GET", pattern, handler)
+}
+
+// POST defines the method to add POST request
+func (e *Engine) POST(pattern string, handler HandlerFunc) {
+	e.addRoute("POST", pattern, handler)
+}
+
+func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	c := newContext(w, req)
+	e.router.handle(c)
+}
+
+// Run defines the method to start a http server
+func (e *Engine) Run(addr string) error {
+	return http.ListenAndServe(addr, e)
+}
+```
+
+在调用 `router.handle` 之前先构造了一个 `gee.Context` 对象。
+
+#### Main
+
+
+
+```go
+package main
+
+import (
+	"gee"
+	"net/http"
+)
+
+func main() {
+	r := gee.New()
+
+	r.GET("/", func(c *gee.Context) {
+		c.HTML(http.StatusOK, "<h1>Hello Gee</h1>")
+	})
+
+	r.GET("/hello", func(c *gee.Context) {
+		c.String(http.StatusOK, "Hello %s, you are at %s\n", c.Query("name"), c.Path)
+	})
+
+	r.POST("/login", func(c *gee.Context) {
+		c.JSON(http.StatusOK, gee.H{
+			"username": c.PostForm("username"),
+			"password": c.PostForm("password"),
+		})
+	})
+
+	r.Run(":9999")
+}
+```
+
+Run and Test ：
+
+```sh
+$ curl 'http://localhost:9999/'
+<h1>Hello Gee</h1>%           
+$ curl 'http://localhost:9999/hello?name=kesa'
+Hello kesa, you are at /hello
+$ url -X POST -d "username=kesa&password=1234" 'http://localhost:9999/login'
+{"password":"1234","username":"kesa"}
+```
+
+## 4. Day3 - 前缀树路由
+
+- 使用 Trie 树实现动态路由 (dynamic route)；
+- 支持两种模式 `:name` 和 `*filepath`；
+
+### 4.1 Trie 树
+
+之前使用 `map` 结构来存储路由表， 虽然索引比较高效，但是只能支持**静态路由**。而动态路由，即一条路由规则可以匹配某一类型而非一条固定的路由。例如 `hello/:name`，可以匹配 `/hello/kesa`, `/hello/geektutu`。
+
+动态路由实现方式有很多，例如在 `gorouter`中使用的是正则表达式，而 `gin` 中使用的是 Trie 树。
+
+前缀树的**每一个节点的所有子节点都拥有相同的前缀**。这种结构非常适用于路由匹配，例如定义如下路由规则：
+
+- /:lang/doc
+- /:lang/tutorial
+- /:lang/intro
+- /about
+- /p/blog
+- /p/related
+
+可以用如下前缀树来表示：
+
+![trie tree](image/trie_router.jpg)
+
+HTTP 请求的路径恰好是 `/` 分隔的多段构成，因此每一段可以作为前缀树的一个节点。我们通过树结构查询，如果中间某一层的节点都不满足条件，则说明没有匹配到路由，查询结束。
+
+#### 实现
+
+// TODO: file URL
 
 
 
