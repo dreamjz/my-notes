@@ -605,6 +605,16 @@ func (n *node) search(parts []string, height int) *node {
 	}
 	return nil
 }
+
+// 遍历前缀树，获取所有的路由模式节点
+func (n *node) travel(list *[]*node) {
+	if n.pattern != "" {
+		*list = append(*list, n)
+	}
+	for _, child := range n.children {
+		child.travel(list)
+	}
+}
 ```
 
 - `node`：前缀树节点；`pattern` 为匹配的模式，`part` 为当前节点对应的路由部分，`children`子节点，`isWild` 为通配标志，当遇到动态参数 `:` 或 通配符`*` 时为 true。
@@ -615,6 +625,252 @@ func (n *node) search(parts []string, height int) *node {
 ### 4.2 Router
 
 
+
+```go
+package gee
+
+import "strings"
+
+// router 结构
+type router struct {
+	roots    map[string]*node       // HTTP 方法，前缀树根节点映射
+	handlers map[string]HandlerFunc // 路由，处理函数映射
+}
+
+func newRouter() *router {
+	return &router{
+		roots:    make(map[string]*node),
+		handlers: make(map[string]HandlerFunc),
+	}
+}
+
+// 解析路由匹配模式，只能有一个通配符
+func parsePattern(pattern string) []string {
+	vs := strings.Split(pattern, "/")
+
+	parts := make([]string, 0)
+	for _, val := range vs {
+		parts = append(parts, val)
+		if val[0] == '*' {
+			break
+		}
+	}
+	return parts
+}
+
+// 添加路由
+func (r *router) addRoute(method, pattern string, handler HandlerFunc) {
+	parts := parsePattern(pattern)
+
+	key := method + "-" + pattern
+	if _, ok := r.roots[method]; !ok {
+		// 前缀树不存在则创建
+		r.roots[method] = &node{}
+	}
+	r.roots[method].insert(pattern, parts, 0)
+	r.handlers[key] = handler
+}
+
+// 获取路由
+func (r *router) getRoute(method, path string) (*node, map[string]string) {
+	// 解析当前请求路径 Path
+	searchParts := parsePattern(path)
+	params := make(map[string]string)
+	root, ok := r.roots[method]
+
+	if !ok {
+		return nil, nil
+	}
+
+	// 搜索前缀树，查找匹配模式
+	n := root.search(searchParts, 0)
+
+	if n != nil {
+		// 解析匹配模式
+		// 因为匹配模式和请求路径解析后的长度相同
+		// 可以推断出动态参数或通配参数
+		parts := parsePattern(n.pattern)
+		for i, part := range parts {
+			if part[0] == ':' {
+				params[part[1:]] = searchParts[i]
+			}
+			if part[0] == '*' && len(part) > 1 {
+				// 获取通配符之后的内容
+				params[part[1:]] = strings.Join(searchParts[i:], "/")
+				// 通配符只能有一个
+				break
+			}
+		}
+		return n, params
+	}
+	return nil, nil
+}
+
+// 获取指定方法的所有路由模式
+func (r *router) getRoutes(method string) []*node {
+	root, ok := r.roots[method]
+	if !ok {
+		return nil
+	}
+	nodes := make([]*node, 0)
+	root.travel(&nodes)
+	return nodes
+}
+
+// 请求处理
+func (r *router) handle(c *Context) {
+	n, params := r.getRoute(c.Method, c.Path)
+	if n != nil {
+		c.Params = params
+		key := c.Method + "-" + n.pattern
+		r.handlers[key](c)
+	}
+}
+```
+
+- `router`: 路由结构体；
+  - `roots`：HTTP Method 和 前缀树根节点组成的映射；例如：POST 方法将会对应自己的路由前缀树；
+  - `handlers`：路由和处理函数组成的映射；
+- `parsePattern`：将路由模式 / 请求路径解析成字符串切片；例如：`/hello/:name` 将会解析成 `["hello", ":name"]`；
+- `addRoute`：添加路由模式和处理函数；将给定的路由模式添加至对应的前缀树中，并添加相关的处理函数；
+- `getRoute`：获取请求路径匹配的路由前缀树节点，并解析出动态路由的参数；
+
+### 4.3 Context
+
+Context 相较于之前，添加了 `Params` 属性和 `Param` 方法，用于存储和获取路由参数；
+
+
+
+```go
+package gee
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+)
+
+// H is alias of map[string]interface{}
+type H map[string]interface{}
+
+type Context struct {
+	// origin objects
+	Writer http.ResponseWriter
+	Req    *http.Request
+	// request info
+	Path   string
+	Method string
+	Params map[string]string // 路由参数
+	// response info
+	StatusCode int
+}
+
+// the constructor of gee.Context
+func newContext(w http.ResponseWriter, req *http.Request) *Context {
+	return &Context{
+		Writer: w,
+		Req:    req,
+		Path:   req.URL.Path,
+		Method: req.Method,
+	}
+}
+
+// Param returns the parameter in URL path
+func (c *Context) Param(key string) string {
+	val, _ := c.Params[key]
+	return val
+}
+
+// PostForm returns the parameter in form data
+func (c *Context) PostForm(key string) string {
+	return c.Req.FormValue(key)
+}
+
+// Query returns the parameter in query string
+func (c *Context) Query(key string) string {
+	return c.Req.URL.Query().Get(key)
+}
+
+// Status set the StatusCode of gee.Context
+// And write status code to response
+func (c *Context) Status(code int) {
+	c.StatusCode = code
+	// 写入响应 HTTP Status Code
+	c.Writer.WriteHeader(code)
+}
+
+// SetHeader set response header
+func (c *Context) SetHeader(key string, val string) {
+	c.Writer.Header().Set(key, val)
+}
+
+func (c *Context) String(code int, format string, values ...interface{}) {
+	c.SetHeader("Content-Type", "text/plain")
+	c.Status(code)
+	c.Writer.Write([]byte(fmt.Sprintf(format, values...)))
+}
+
+func (c *Context) JSON(code int, obj interface{}) {
+	c.SetHeader("Content-Type", "application/json")
+	c.Status(code)
+	encoder := json.NewEncoder(c.Writer)
+	if err := encoder.Encode(obj); err != nil {
+		http.Error(c.Writer, err.Error(), 500)
+	}
+}
+
+func (c *Context) Data(code int, data []byte) {
+	c.Status(code)
+	c.Writer.Write(data)
+}
+
+func (c *Context) HTML(code int, html string) {
+	c.SetHeader("Content-Type", "text/html")
+	c.Status(code)
+	c.Writer.Write([]byte(html))
+}
+```
+
+### 4.4 Gee
+
+
+
+```go
+package gee
+
+import (
+	"log"
+	"net/http"
+)
+
+type HandlerFunc func(c *Context)
+
+type Engine struct {
+	router *router
+}
+
+func New() *Engine {
+	return &Engine{router: newRouter()}
+}
+
+func (e *Engine) addRoute(method, pattern string, handler HandlerFunc) {
+	log.Printf("Route: %4s - %s", method, pattern)
+	e.router.addRoute(method, pattern, handler)
+}
+
+func (e *Engine) GET(pattern string, handler HandlerFunc) {
+	e.addRoute("GET", pattern, handler)
+}
+
+func (e *Engine) POST(pattern string, handler HandlerFunc) {
+	e.addRoute("POST", pattern, handler)
+}
+
+func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	c := newContext(w, req)
+	e.router.handle(c)
+}
+```
 
 
 
