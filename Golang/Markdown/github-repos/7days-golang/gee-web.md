@@ -499,7 +499,7 @@ $ url -X POST -d "username=kesa&password=1234" 'http://localhost:9999/login'
 
 动态路由实现方式有很多，例如在 `gorouter`中使用的是正则表达式，而 `gin` 中使用的是 Trie 树。
 
-前缀树的**每一个节点的所有子节点都拥有相同的前缀**。这种结构非常适用于路由匹配，例如定义如下路由规则：
+**Trie**，又称**前缀树**或**字典树**，是一种有序树，用于保存关联数组，其中的键通常为字符串[^1]。前缀树的**每一个节点的所有子节点都拥有相同的前缀**。这种结构非常适用于路由匹配，例如定义如下路由规则：
 
 - /:lang/doc
 - /:lang/tutorial
@@ -518,8 +518,110 @@ HTTP 请求的路径恰好是 `/` 分隔的多段构成，因此每一段可以�
 
 // TODO: file URL
 
+```go
+package gee
+
+import (
+	"fmt"
+	"strings"
+)
+
+// Trie 树节点
+type node struct {
+	pattern  string  // 待匹配的路由
+	part     string  // 当前节点对应部分
+	children []*node // 子节点
+	isWild   bool    // 通配标志
+}
+
+func (n *node) String() string {
+	return fmt.Sprintf("node{pattern= %s, part= %s, isWild=%t", n.pattern, n.part, n.isWild)
+}
+
+// 寻找第一个匹配的节点
+func (n *node) matchChild(part string) *node {
+	// 查找子节点
+	for _, child := range n.children {
+		if child.part == part || child.isWild {
+			return child
+		}
+	}
+	return nil
+}
+
+// 寻找所有匹配的节点
+func (n *node) matchChildren(part string) *[]*node {
+	nodes := make([]*node, 0)
+	for _, child := range n.children {
+		if child.part == part || child.isWild {
+			nodes = append(nodes, child)
+		}
+	}
+	return &nodes
+}
+
+// 插入新节点
+func (n *node) insert(pattern string, parts []string, height int) {
+	// 递归出口
+	if len(parts) == height {
+		// 记录匹配模式
+		n.pattern = pattern
+	}
+
+	part := parts[height]
+	// 查找匹配节点
+	child := n.matchChild(part)
+	if child == nil {
+		// 未找到则新增节点
+		child = &node{part: part, isWild: part[0] == ':' || part[0] == '*'}
+		n.children = append(n.children, child)
+	}
+
+	// 递归新增节点
+	child.insert(pattern, parts, height+1)
+}
+
+// 查找匹配节点
+func (n *node) search(parts []string, height int) *node {
+	// 递归出口
+	if len(parts) == height || strings.HasPrefix(n.part, "*") {
+		// 匹配模式为空，未找到
+		if n.pattern == "" {
+			return nil
+		}
+		return n
+	}
+
+	part := parts[height]
+	// 查找所有匹配的节点
+	children := n.matchChildren(part)
+
+	for _, child := range *children {
+		// 递归搜索每个子节点
+		result := child.search(parts, height+1)
+		if result != nil {
+			return result
+		}
+	}
+	return nil
+}
+```
+
+- `node`：前缀树节点；`pattern` 为匹配的模式，`part` 为当前节点对应的路由部分，`children`子节点，`isWild` 为通配标志，当遇到动态参数 `:` 或 通配符`*` 时为 true。
+  例如：路由 `/hello/:name/go`，最后一个节点的 `pattern` 为 `/hello/:name/go`， `part` 为 `go`，`isWild` 为 false；
+- `insert`：插入新节点；递归查找 (`matchChild`)每一层节点，若没有则新增节点，直到最后一个节点的高度(`height`)和 `len(parts)` 相同时才设置 `pattern` 并退出递归；
+- `search`：查找节点；递归查询每一层节点，若 `len(parts) == height ` 或 遇到通配符，则检查 `pattern` 是否为空，不为空则表示找到匹配的节点；
+
+### 4.2 Router
+
+
+
 
 
 ## Reference
 
 1. [七天用Go从零实现系列](https://geektutu.com/post/gee.html)
+
+
+
+[^1]: [Trie Wikipedia](https://zh.wikipedia.org/wiki/Trie)
