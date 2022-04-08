@@ -566,6 +566,7 @@ func (n *node) insert(pattern string, parts []string, height int) {
 	if len(parts) == height {
 		// 记录匹配模式
 		n.pattern = pattern
+		return
 	}
 
 	part := parts[height]
@@ -629,7 +630,10 @@ func (n *node) travel(list *[]*node) {
 ```go
 package gee
 
-import "strings"
+import (
+	"net/http"
+	"strings"
+)
 
 // router 结构
 type router struct {
@@ -650,9 +654,11 @@ func parsePattern(pattern string) []string {
 
 	parts := make([]string, 0)
 	for _, val := range vs {
-		parts = append(parts, val)
-		if val[0] == '*' {
-			break
+		if val != "" {
+			parts = append(parts, val)
+			if val[0] == '*' {
+				break
+			}
 		}
 	}
 	return parts
@@ -724,6 +730,8 @@ func (r *router) handle(c *Context) {
 		c.Params = params
 		key := c.Method + "-" + n.pattern
 		r.handlers[key](c)
+	} else {
+		c.String(http.StatusNotFound, "404 NOT FOUND: %s\n", c.Path)
 	}
 }
 ```
@@ -734,6 +742,82 @@ func (r *router) handle(c *Context) {
 - `parsePattern`：将路由模式 / 请求路径解析成字符串切片；例如：`/hello/:name` 将会解析成 `["hello", ":name"]`；
 - `addRoute`：添加路由模式和处理函数；将给定的路由模式添加至对应的前缀树中，并添加相关的处理函数；
 - `getRoute`：获取请求路径匹配的路由前缀树节点，并解析出动态路由的参数；
+
+#### 单元 测试
+
+
+
+```go
+package gee
+
+import (
+	"fmt"
+	"reflect"
+	"testing"
+)
+
+func newTestRouter() *router {
+	r := newRouter()
+	r.addRoute("GET", "/hello/:name", nil)
+	r.addRoute("GET", "/assets/*filepath", nil)
+	return r
+}
+
+func TestParsePattern(t *testing.T) {
+	ok := reflect.DeepEqual(parsePattern("/p/:name"), []string{"p", ":name"})
+	ok = ok && reflect.DeepEqual(parsePattern("/p/*"), []string{"p", "*"})
+	ok = ok && reflect.DeepEqual(parsePattern("/p/*name/*"), []string{"p", "*name"})
+	if !ok {
+		t.Fatal("test parsePattern failed")
+	}
+}
+
+func TestGetRoute(t *testing.T) {
+	r := newTestRouter()
+	n, ps := r.getRoute("GET", "/hello/dreamjz")
+
+	if n == nil {
+		t.Fatal("nil shouldn't be returned")
+	}
+
+	if n.pattern != "/hello/:name" {
+		t.Fatal("should match /hello/:name")
+	}
+
+	if ps["name"] != "dreamjz" {
+		t.Fatal("name should be equal to 'dreamjz'")
+	}
+
+	fmt.Printf("Matched path: %q, params[\"name\"]: %q\n", n.pattern, ps["name"])
+}
+
+func TestGetRoute1(t *testing.T) {
+	r := newTestRouter()
+	n1, ps1 := r.getRoute("GET", "/assets/file.txt")
+	ok1 := n1.pattern == "/assets/*filepath" && ps1["filepath"] == "file.txt"
+	if !ok1 {
+		t.Fatal("pattern should be 'assets/*filepath' and filepath should be 'file.txt'")
+	}
+
+	n2, ps2 := r.getRoute("GET", "/assets/css/test.css")
+	ok2 := n2.pattern == "/assets/*filepath" && ps2["filepath"] == "css/test.css"
+	if !ok2 {
+		t.Fatal("pattern should be 'assets/*filepath' and filepath should be 'css/test.css'")
+	}
+}
+
+func TestGetRoutes(t *testing.T) {
+	r := newTestRouter()
+	nodes := r.getRoutes("GET")
+	for i, n := range nodes {
+		fmt.Printf("%d. %v\n", i+1, n)
+	}
+
+	if len(nodes) != 2 {
+		t.Fatal("the number of routes should be 2")
+	}
+}
+```
 
 ### 4.3 Context
 
@@ -869,6 +953,204 @@ func (e *Engine) POST(pattern string, handler HandlerFunc) {
 func (e *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	c := newContext(w, req)
 	e.router.handle(c)
+}
+```
+
+
+
+## 5. Day4 - 分组控制
+
+- 实现路由的分组控制 (Route Group Control)
+
+### 5.1 路由分组
+
+分组控制 (Group Control) 是 Web 框架应提供的基础功能之一。分组指的是**路由**的分组，若没有分组则需要针对每一个路由进行控制，而真实的业务场景中，往往需要某一组路由进行相似的处理，例如：
+
+- `/public` 开头的路由可以匿名访问；
+- `/admin` 开头的路由需要鉴权；
+- `/api` 开头的路由是 RESTFul 接口，用于对接其他系统；
+
+分组以相同的前缀区分，并且支持嵌套，如分组 `/public` 可以有子分组 `/public/a` 和 `/public/b`。中间件可以作用在不同的分组上，可以使得框架拥有极大的扩展能力。
+
+### 5.2 Group
+
+
+
+```go
+package gee
+
+import (
+	"log"
+	"net/http"
+)
+
+// HandlerFunc defines the request handler used by gee
+type HandlerFunc func(c *Context)
+
+type RouterGroup struct {
+	prefix      string
+	middlewares []HandlerFunc // support middleware
+	engine      *Engine       // all groups share one Engine instance
+}
+
+// Group is defined to create a new RouterGroup
+// All groups share the same Engine instance
+func (group *RouterGroup) Group(prefix string) *RouterGroup {
+	engine := group.engine
+	newGroup := &RouterGroup{
+		prefix: group.prefix + prefix,
+		engine: engine,
+	}
+	engine.groups = append(engine.groups, newGroup)
+	return newGroup
+}
+
+func (group *RouterGroup) addRoute(method, path string, handler HandlerFunc) {
+	pattern := group.prefix + path
+	log.Printf("Route %4s - %s", method, pattern)
+	group.engine.router.addRoute(method, pattern, handler)
+}
+
+func (group *RouterGroup) GET(pattern string, handler HandlerFunc) {
+	group.addRoute("GET", pattern, handler)
+}
+
+func (group *RouterGroup) POST(pattern string, handler HandlerFunc) {
+	group.addRoute("POST", pattern, handler)
+}
+
+// Engine implement the interface http.Handler
+type Engine struct {
+	RouterGroup
+	router *router
+	groups []*RouterGroup
+}
+
+// New is the constructor of gee.Engine
+func New() *Engine {
+	engine := &Engine{router: newRouter()}
+	engine.RouterGroup = RouterGroup{engine: engine}
+	engine.groups = []*RouterGroup{&engine.RouterGroup}
+	return engine
+}
+
+func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	c := newContext(w, req)
+	engine.router.handle(c)
+}
+
+func (engine *Engine) Run(addr string) error {
+	return http.ListenAndServe(addr, engine)
+}
+
+```
+
+- `Engine` ：内嵌了 `RouterGroup` ，可以调用其方法（继承）；
+- `RouterGroup`：路由分组；
+  - `prefix`：当前分组前缀；
+  - `middlewares`：分组所使用的中间件；
+  - `engine`：Engine 实例，所有的分组共享一个实例；
+- `addRoute`：添加路由；既可以使用 `Engine` 直接添加路由，也可以使用 `RouterGroup` 来添加，`Engine` 内部嵌套了 `RouterGroup` 可以看做是特殊的分组；
+
+### 5.3 Main
+
+
+
+```go
+package main
+
+import (
+	"gee"
+	"net/http"
+)
+
+func main() {
+	r := gee.New()
+
+	r.GET("/", func(c *gee.Context) {
+		c.HTML(http.StatusOK, "<h1>Hello Gee!</h1>")
+	})
+
+	v1 := r.Group("/v1")
+	{
+		v1.GET("/", func(c *gee.Context) {
+			c.HTML(http.StatusOK, "<h1>Hello Group-1</h1>")
+		})
+		v1.GET("/hello/:name", func(c *gee.Context) {
+			c.String(http.StatusOK, "Hello %s, you are at %s\n", c.Param("name"), c.Path)
+		})
+	}
+
+	v2 := r.Group("/v2")
+	{
+		v2.GET("/hello", func(c *gee.Context) {
+			c.String(http.StatusOK, "Hello %s, you are at %s\n", c.Query("name"), c.Path)
+		})
+		v2.POST("/login", func(c *gee.Context) {
+			c.JSON(http.StatusOK, gee.H{
+				"username": c.PostForm("username"),
+				"password": c.PostForm("password"),
+			})
+		})
+	}
+
+	r.Run(":9999")
+}
+```
+
+## 6. Day5 - 中间件
+
+- 实现 Web 框架中间件 (Middleware)；
+- 实现通用 `Logger` 中间件，记录响应时间；
+
+### 6.1 中间件
+
+中间件 (middlewares)，就是非业务的技术组件。Web 框架不能理解所有的业务，因而不能实现所有的功能。因此，框架需要一个插口，允许用户自己定义功能，嵌入至框架中，这个就是中间件。
+
+对于中间件需要考虑两个关键点：
+
+- **插入点的位置**：若插入点位置过于底层，会导致中间件逻辑过于复杂；若插入位置离用户接口过进，则和用户自定义函数然后在 handler 中直接使用相比优势不大；
+- **中间件的输入**：中间件的输入决定了扩展能力；若暴露的参数过少，用户的发挥空间有限；
+
+### 6.2 设计
+
+Gee 中间件的输入为 `Context` 对象，插入点是框架接收到初始化的 `Context` 对象之后。允许用户使用自己定义的中间件进行额外的任务处理，如日志记录，`Context` 进行二次修改等。
+
+更改 `Context` 结构 () :
+
+```go
+type Context struct {
+	// origin objects
+	Writer http.ResponseWriter
+	Req    *http.Request
+	// request info
+	Path   string
+	Method string
+	Params map[string]string // 路由参数
+	// response info
+	StatusCode int
+	// middleware
+	handlers []HandlerFunc
+	index int
+}
+
+// the constructor of gee.Context
+func newContext(w http.ResponseWriter, req *http.Request) *Context {
+	return &Context{
+		Writer: w,
+		Req:    req,
+		Path:   req.URL.Path,
+		Method: req.Method,
+		index: -1,
+	}
+}
+
+func (c *Context) Next() {
+	c.index++
+	s := len(c.handlers)
+	for ;c.index < s; c.index++{
+		c.handlers[c.index](c)
+	}
 }
 ```
 
