@@ -1116,6 +1116,8 @@ func main() {
 
 Gee 中间件的输入为 `Context` 对象，插入点是框架接收到初始化的 `Context` 对象之后。允许用户使用自己定义的中间件进行额外的任务处理，如日志记录，`Context` 进行二次修改等。
 
+#### Context
+
 更改 `Context` 结构 () :
 
 ```go
@@ -1152,13 +1154,517 @@ func (c *Context) Next() {
 		c.handlers[c.index](c)
 	}
 }
+
+func (c *Context) Fail(code int, err string) {
+	// 终止执行
+	c.index = len(c.handlers)
+	// 返回
+	c.JSON(code, H{
+		"message": err,
+	})
+}
 ```
 
+- `index`：用于记录当前执行到哪个中间件；
+- `Next`：当中间件调用 `Next` 方法时，将控制权交给下一个中间件，直至最后一个；然后从后往前调用每个中间件 `Next` 方法之后的部分。
+- `Fail`：终止执行并返回；
 
+假设现有中间件 A ，B 和路由处理函数 Handler：
+
+```go
+func A(c *Context) {
+    A1
+    c.Next()
+    A2
+}
+
+func B(c *Context) {
+    B1
+    c.Next()
+    B2
+}
+
+func Handler1(c *Context) {
+    H1
+}
+```
+
+那么执行顺序将会是 `A1 -> B1 -> H1 -> B2 -> A2 `。
+
+#### Gee
+
+
+
+```go
+// Use is defined to add middleware to the group
+func (group *RouterGroup) Use(middlewares ...HandlerFunc) {
+	group.middlewares = append(group.middlewares, middlewares...)
+}
+
+func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	var middlewares []HandlerFunc
+	for _, group := range engine.groups {
+		// 通过 URL 前缀来判断适用的中间件
+		if strings.HasPrefix(req.URL.Path, group.prefix) {
+			middlewares = append(middlewares, group.middlewares...)
+		}
+	}
+	c := newContext(w, req)
+	c.handlers = middlewares
+	engine.router.handle(c)
+}
+```
+
+- `Use`：为 RouterGroup 添加中间件；
+- `ServeHTTP`：新增添加中间件逻辑；通过 URL 前缀来添加适用的中间件；
+
+#### Router
+
+
+
+```go
+// 请求处理
+func (r *router) handle(c *Context) {
+	n, params := r.getRoute(c.Method, c.Path)
+
+	if n != nil {
+		c.Params = params
+		key := c.Method + "-" + n.pattern
+		// 将路由处理函数追加至 c.handlers
+		c.handlers = append(c.handlers, r.handlers[key])
+	} else {
+		c.handlers = append(c.handlers, func(c *Context) {
+			c.String(http.StatusNotFound, "404 NOT FOUND: %s\n", c.Path)
+		})
+	}
+	// 开始执行
+	c.Next()
+}
+```
+
+- `handle`：修改逻辑，将路由对应的处理函数添加至 Context 中，调用 `c.Next()` 开始执行；
+
+###  6.3 使用
+
+#### Logger
+
+创建中间件 `Logger()` 用于记录请求处理时间；
+
+
+
+```go
+func Logger() HandlerFunc {
+	return func(c *Context) {
+		// Start time
+		t := time.Now()
+		// Process request
+		c.Next()
+		// Calculate process time
+		log.Printf("[%d] %s in %v\n", c.StatusCode, c.Req.RequestURI, time.Since(t))
+	}
+}
+```
+
+#### Main
+
+
+
+```go
+package main
+
+import (
+	"gee"
+	"log"
+	"net/http"
+	"time"
+)
+
+func onlyForV2() gee.HandlerFunc {
+	return func(c *gee.Context) {
+		t := time.Now()
+		c.Fail(http.StatusInternalServerError, "Internal Server Error")
+		log.Printf("[%d] %s in %v for group v2", c.StatusCode, c.Req.RequestURI, time.Since(t))
+	}
+}
+
+func main() {
+	r := gee.New()
+	// Global middleware
+	r.Use(gee.Logger())
+	r.GET("/", func(c *gee.Context) {
+		c.String(http.StatusOK, "Hello")
+	})
+
+	v2 := r.Group("/v2")
+	v2.Use(onlyForV2())
+	{
+		v2.GET("/hello", func(c *gee.Context) {
+			c.String(http.StatusOK, "Hello %s, you are at %s", c.Query("name"), c.Path)
+		})
+	}
+
+	r.Run(":9999")
+}
+```
+
+Run and Test:
+
+```sh
+$ curl 'http://localhost:9999/v2/hello?name=dreamjz'
+{"message":"Internal Server Error"}
+
+2022/04/11 14:31:02 Route  GET - /
+2022/04/11 14:31:02 Route  GET - /v2/hello
+2022/04/11 14:31:05 [500] /v2/hello?name=dreamjz in 28.682µs for group v2
+2022/04/11 14:31:05 [500] /v2/hello?name=dreamjz in 56.117µs
+```
+
+## 7. Day6 - 模板
+
+- 实现静态资源服务 (Static Resouce)；
+- 支持 HTML 模板渲染；
+
+### 7.1 静态文件 (Serve Static Files)
+
+在设计动态路由时，支持 `/*filepath` 的形式，若我们将文件放在 `/usr/web` 目录下，那么 `filepath` 的值则为文件的相对路径；我们只需解析出 `filepath` 将其交给 `http.FileServer` 处理即可。
+
+#### Gee
+
+```go
+// Create static handler
+func (group *RouterGroup) createStaticHandler(relativePath string, fs http.FileSystem) HandlerFunc {
+	fullPath := path.Join(group.prefix, relativePath)
+	fileServer := http.StripPrefix(fullPath, http.FileServer(fs))
+	return func(c *Context) {
+		file := c.Param("filepath")
+		// Check if file exists and if we have permission to access it
+		if _, err := fs.Open(file); err != nil {
+			c.Status(http.StatusNotFound)
+			return
+		}
+
+		fileServer.ServeHTTP(c.Writer, c.Req)
+	}
+}
+
+// Static defines a method to serve static files
+func (group *RouterGroup) Static(relativePath, root string) {
+	handler := group.createStaticHandler(relativePath, http.Dir(root))
+	urlPattern := path.Join(relativePath, "/*filepath")
+	group.GET(urlPattern, handler)
+}
+```
+
+- `createStaticHandler`：封装 `fileServer.ServeHTTP`；根据传入的相对路径和根路径返回处理函数；
+- `Static`：用户接口；根据用户传入的相对路径和真实路径注册路由；
+
+简单示例：
+
+```go
+r := gee.New()
+r.Static("/assets", "/blog/static")
+// 或相对路径 r.Static("/assets", "./static")
+r.Run(":9999")
+```
+
+访问 `http://localhost:9999/assets/js/test.js` 将返回文件 `/blog/static/js/test.js`。
+
+### 7.2 HTML 模板渲染
+
+#### Gee
+
+```go
+// Engine implement the interface http.Handler
+type Engine struct {
+	RouterGroup
+	router *router
+	groups []*RouterGroup
+	// HTML render
+	htmlTemplate *template.Template
+	funcMap      template.FuncMap
+}
+
+// SetFuncMap for custom render function
+func (engine *Engine) SetFuncMap(funcMap template.FuncMap) {
+	engine.funcMap = funcMap
+}
+
+func (engine *Engine) LoadHTMLGlob(pattern string) {
+	engine.htmlTemplate = template.Must(template.New("").Funcs(engine.funcMap).ParseGlob(pattern))
+}
+```
+
+为 `Engine` 结构添加 `*template.Template` 和 `template.FuncMap` 类型的字段，前者用于将所有模板加载进内存，后者为所有的自定义模板渲染函数。
+
+ `SetFuncMap` 可以添加自定义渲染函数。
+
+#### Context
+
+```go
+type Context struct {
+	// origin objects
+	Writer http.ResponseWriter
+	Req    *http.Request
+	// request info
+	Path   string
+	Method string
+	Params map[string]string // 路由参数
+	// response info
+	StatusCode int
+	// middleware
+	handlers []HandlerFunc
+	index    int
+	// engine
+	engine *Engine
+}
+
+
+func (c *Context) HTML(code int, name string, data interface{}) {
+	c.SetHeader("Content-Type", "text/html")
+	c.Status(code)
+	if err := c.engine.htmlTemplate.ExecuteTemplate(c.Writer, name, data); err != nil {
+		c.Fail(http.StatusInternalServerError, err.Error())
+	}
+}
+```
+
+`Context` 添加了指向 `engine` 的指针，可以访问 HTML 模板。
+
+同时在初始化时为 `engine` 赋值：
+
+```go
+func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
+	var middlewares []HandlerFunc
+	for _, group := range engine.groups {
+		// 通过 URL 前缀来判断适用的中间件
+		if strings.HasPrefix(req.URL.Path, group.prefix) {
+			middlewares = append(middlewares, group.middlewares...)
+		}
+	}
+	c := newContext(w, req)
+	c.handlers = middlewares
+	c.engine = engine
+	engine.router.handle(c)
+}
+```
+
+#### Main
+
+
+
+```go
+package main
+
+import (
+	"fmt"
+	"gee"
+	"html/template"
+	"net/http"
+	"time"
+)
+
+type Student struct {
+	Name string
+	Age  int
+}
+
+func FormatAsDate(t time.Time) string {
+	y, m, d := t.Date()
+	return fmt.Sprintf("%d-%02d-%02d", y, m, d)
+}
+
+func main() {
+	r := gee.New()
+	r.Use(gee.Logger())
+	r.SetFuncMap(template.FuncMap{
+		"FormatAsDate": FormatAsDate,
+	})
+	r.LoadHTMLGlob("templates/*")
+	r.Static("/assets", "./static")
+
+	stu1 := &Student{"A", 1}
+	stu2 := &Student{"B", 2}
+	r.GET("/", func(c *gee.Context) {
+		c.HTML(http.StatusOK, "css.tmpl", nil)
+	})
+	r.GET("/students", func(c *gee.Context) {
+		c.HTML(http.StatusOK, "arr.tmpl", gee.H{
+			"title":  "gee",
+			"stuArr": [2]*Student{stu1, stu2},
+		})
+	})
+
+	r.GET("/date", func(c *gee.Context) {
+		c.HTML(http.StatusOK, "custom_func.tmpl", gee.H{
+			"title": "gee",
+			"now":   time.Date(2022, 04, 11, 0, 0, 0, 0, time.UTC),
+		})
+	})
+	r.Run(":9999")
+}
+```
+
+## 8. Day7 - 错误恢复
+
+- 实现错误处理机制；
+
+### 8.1 Panic
+
+Golang 中，常见的错误处理方式为返回 `error` ，由调用者决定如何处理；若为无法处理的错误将会使用 `panic`。
+
+例如：
+
+主动触发 panic
+
+```go
+func main() {
+    fmt.Println("before panic")
+    panic("crash")
+    fmt.Println("after panic")
+}
+```
+
+```sh
+$ go run ./main.go 
+before panic
+panic: crash
+
+goroutine 1 [running]:
+main.main()
+        ~/main.go:7 +0x95
+exit status 2
+```
+
+数组越界：
+
+```go
+func main() {
+	arr := []int{1, 2}
+	fmt.Println(arr[3])
+}
+```
+
+```sh
+$ go run ./main.go
+panic: runtime error: index out of range [3] with length 2
+
+goroutine 1 [running]:
+main.main()
+        ~/main.go:7 +0x1d
+exit status 2
+```
+
+### 8.2 Defer
+
+panic 会导致程序终止，在退出之前会处理完当前协程上的 defer 任务。
+
+```go
+func main() {
+    defer func(){
+        fmt.Println("defer func")
+    }()
+	arr := []int{1, 2}
+	fmt.Println(arr[3])
+}
+```
+
+```sh
+$ go run ./main.go
+defer func
+panic: runtime error: index out of range [3] with length 2
+
+goroutine 1 [running]:
+main.main()
+        ~/main.go:10 +0x4e
+exit status 2
+```
+
+多个 defer 会按照 后进先出 (LIFO) 的顺序执行，后定义的 defer 会被先执行；在 defer 完成后会触发 panic。
+
+### 8.3 Recover
+
+Golang  提供了 recover 函数，只在 defer 中生效，可以避免 panic 发生导致程序终止。
+
+```go
+func main() {
+    defer func(){
+        fmt.Println("defer func")
+        if err := recover(); err != nil {
+            fmt.Println("recover success")
+        }
+    }()
+	arr := []int{1, 2}
+	fmt.Println(arr[3])
+}
+```
+
+```sh
+$ go run ./main.go
+defer func
+recover success
+```
+
+### 8.4 Gee 错误处理
+
+若 Web 框架没有错误处理机制，那么一些无法控制的错误情况将会导致程序停止，这时不可接受的。
+
+我们可以将错误处理作为中间件引入，不仅可以实现默认的错误处理，还可以让用户自定义；
+
+
+
+```go
+func Recovery() HandlerFunc {
+	return func(c *Context) {
+		defer func() {
+			if err := recover(); err != nil {
+				message := fmt.Sprintf("%s", err)
+				log.Printf("%s\n\n", trace(message))
+				c.Fail(http.StatusInternalServerError, "Internal Server Error")
+			}
+		}()
+		c.Next()
+	}
+}
+
+func trace(message string) string {
+	var pcs [32]uintptr
+	// skip first 3 caller
+	n := runtime.Callers(3, pcs[:])
+
+	var sb strings.Builder
+	sb.WriteString(message + "\nTraceback:")
+	for _, pc := range pcs[:n] {
+		fn := runtime.FuncForPC(pc)
+		file, line := fn.FileLine(pc)
+		sb.WriteString(fmt.Sprintf("\n\t%s:%d", file, line))
+	}
+	return sb.String()
+}
+```
+
+- `runtime.Callers(3, pcs[:])`，Callers 返回调用栈的程序计数器，0 为 Caller 本身，1 为上一层 trace，2 为 defer func， 此处直接跳过这三个；
+- `runtime.FuncForPC` 获取对应的函数；
+- `fn.FileLine(pc)`：获取调用该函数的文件名和行号；
+
+
+
+```go
+func main() {
+	r := gee.New()
+	r.Use(gee.Logger(), gee.Recovery())
+	r.GET("/panic", func(c *gee.Context) {
+		names := []string{"A"}
+		c.String(http.StatusOK, "%s", names[3])
+	})
+	r.Run(":9999")
+}
+```
 
 ## Reference
 
 1. [七天用Go从零实现系列](https://geektutu.com/post/gee.html)
+1. [Package runtime - golang.org](https://golang.org/pkg/runtime/)
+3. [Is it possible get information about caller function in Golang? - StackOverflow](https://stackoverflow.com/questions/35212985/is-it-possible-get-information-about-caller-function-in-golang)
 
 
 
