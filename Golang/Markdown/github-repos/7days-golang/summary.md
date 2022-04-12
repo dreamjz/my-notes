@@ -9,10 +9,5 @@ publish: true
 
 ## 1. Gee-Web
 
-<details>
-    <summary>A</summary>
-    ```go
-    AAA
-    ```
-</details>
+
 
