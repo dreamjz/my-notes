@@ -216,6 +216,204 @@ Channel 用于 go 协程间的通讯。
 
 Channel 发送和接收都是原子性的，保证了并发安全。
 
+### 实现原理
+
+Channel 是一个队列，遵循先进先出原则，负责协程之间的通信。
+
+#### 数据结构
+
+通过 var 声明或 make 创建的 channel 变量是一个存储在函数栈上的指针，占用 8 个字节，指向堆上的 Channel 结构体。
+
+![hchan](image/hchan.png)
+
+```go
+type hchan struct {
+ closed   uint32   // channel是否关闭的标志
+ elemtype *_type   // channel中的元素类型
+ 
+ // channel分为无缓冲和有缓冲两种。
+ // 对于有缓冲的channel存储数据，使用了 ring buffer（环形缓冲区) 来缓存写入的数据，本质是循环数组
+ // 为啥是循环数组？普通数组不行吗，普通数组容量固定更适合指定的空间，弹出元素时，普通数组需要全部都前移
+ // 当下标超过数组容量后会回到第一个位置，所以需要有两个字段记录当前读和写的下标位置
+ buf      unsafe.Pointer // 指向底层循环数组的指针（环形缓冲区）
+ qcount   uint           // 循环数组中的元素数量
+ dataqsiz uint           // 循环数组的长度
+ elemsize uint16                 // 元素的大小
+ sendx    uint           // 下一次写下标的位置
+ recvx    uint           // 下一次读下标的位置
+  
+ // 尝试读取channel或向channel写入数据而被阻塞的goroutine
+ recvq    waitq  // 读等待队列
+ sendq    waitq  // 写等待队列
+
+ lock mutex //互斥锁，保证读写channel时不存在并发竞争问题
+}
+```
+
+Channel 的主要组成部分：
+
+- 用于保存 goroutine 之间传递数据的循环数组：buf；
+- 用于记录循环数组当前发送和接收数据的下标：sendx 和 recvx；
+- 用于保存该 chan 发送和接收数据被阻塞的 goroutine 队列：sendq 和  recvq；
+- 保证 channel 写入和读取数据时线程安全的锁：lock；
+
+### 特点
+
+Channel 有两种类型：无缓冲和有缓冲；
+
+Channel 有3种模式：写操作模式（单向）、读操作模式（单向）、读写操作模式（双向）
+
+|      | 写操作模式       | 读操作模式       | 读写操作模式   |
+| ---- | ---------------- | ---------------- | -------------- |
+| 创建 | make(chan<- int) | make(<-chan int) | make(chan int) |
+
+Channel 有3种状态：未初始化、正常、关闭
+
+| 操作 | 未初始化         | 关闭                               | 正常           |
+| ---- | ---------------- | ---------------------------------- | -------------- |
+| 关闭 | panic            | panic                              | 正常关闭       |
+| 发送 | 永远阻塞导致死锁 | panic                              | 阻塞或发送成功 |
+| 接收 | 永远阻塞导致死锁 | 缓冲区为空则为零值，否则可以继续读 | 阻塞或成功接收 |
+
+- channel 不能多次关闭，会导致 panic
+- 多个协程监听同一个 channel，channel 上的数据**可能随机被一个goroutine 取走进行消费**
+- 多个协程监听 同一个 channel，channel 被关闭，**所有协程都能收到退出信号**
+
+#### 如何实现线程安全
+
+channel 底层实现中，hchan 结构中使用 sync.Mutex 锁保证数据的读写安全。在对循环数组 buf 中的数据进行入队和出队操作时，必须获取互斥锁，才能操作 channel 数据。
+
+#### 如何控制并发顺序
+
+**多个 goroutine并发执行，每个 goroutine 抢到处理器的时间点不一致，无法保证 goroutine 的执行顺序**
+
+可以使用 channel 传递信息，从而控制并发执行顺序
+
+```go
+func main() {
+	var wg sync.WaitGroup
+	ch1 := make(chan struct{}, 1)
+	ch2 := make(chan struct{}, 1)
+	ch3 := make(chan struct{}, 1)
+	wg.Add(3)
+	start := time.Now()
+	ch1 <- struct{}{}
+	go doTask("goroutine1", ch1, ch2, &wg)
+	go doTask("goroutine2", ch2, ch3, &wg)
+	go doTask("goroutine3", ch3, ch1, &wg)
+	wg.Wait()
+	end := time.Now()
+	fmt.Printf("Duration: %s", end.Sub(start))
+}
+
+func doTask(name string, inCh chan struct{}, outCh chan struct{}, wg *sync.WaitGroup) {
+	defer wg.Done()
+	time.Sleep(1 * time.Second)
+	select {
+	case <-inCh:
+		fmt.Println(name)
+		outCh <- struct{}{}
+	}
+}
+```
+
+#### 死锁场景
+
+出现死锁：
+
+- 单个协程永久阻塞；
+- 多个协程，由于竞争资源或因通信造成阻塞；
+
+场景：
+
+- 无缓存 channel 只写不读；
+- 无缓存 channel 协程阻塞导致子协程无法执行；
+- 有缓存 channel 写入超过缓冲区数量；
+- 空读；
+- 多个协程互相等待；
+
+1. 无缓存 channel 只写不读
+   ```go
+   func main() {
+   	ch := make(chan struct{})
+   	ch <- struct{}{}
+   }
+   ```
+
+2. 无缓存 channel 读在写之后
+
+   ```go
+   func main() {
+   	ch := make(chan struct{})
+   	ch <- struct{}{}
+   	go func() {
+   		<-ch
+   		fmt.Println("Read")
+   	}()
+   }
+   ```
+
+3. 有缓存的 channel 写入超过缓冲区数量
+   ```go
+   func main() {
+   	ch := make(chan int, 3)
+   	ch <- 0
+   	ch <- 1
+   	ch <- 2
+   	ch <- 3 // block
+   }
+   ```
+
+4. 空读
+   ```go
+   func main() {
+   	ch := make(chan int)
+   	<-ch
+   }
+   ```
+
+5. 相互等待
+
+   ```go
+   func main() {
+   	var wg sync.WaitGroup
+   	ch1 := make(chan int)
+   	ch2 := make(chan int)
+   	wg.Add(2)
+   
+   	go func() {
+   		defer wg.Done()
+   		select {
+   		case <-ch1:
+   			ch2 <- 0
+   		}
+   	}()
+   
+   	go func() {
+   		defer wg.Done()
+   		select {
+   		case <-ch2:
+   			ch1 <- 0
+   		}
+   	}()
+   
+   	wg.Wait()
+   }
+   ```
+
+
+#### channel 的关闭
+
+   通道关闭原则
+
+   - 不要在数据接收方或有多个发送者的情况下关闭通道，即让一个唯一的通道发送者关闭通道。
+
+   优雅的关闭通道
+
+1. M 个接收者和一个发送者，发送者通过关闭用来传输数据的通道来传递发送结束信号；
+2. 一个接收者和 N 个发送者，接收者关闭额外的信号通道来通知发送者关闭通道；注意此时发送通道并未关闭，之后未使用的通道将会被回收；
+3. M 个接收者和一个发送者，采用中间调解者（缓冲为 1 的 channel），发送者或接收者中的任何一个都可以向中间调解者发送信号来关闭通道；
+
 ## 9. GC
 
 三色标记法：
@@ -433,3 +631,4 @@ G0 用于：
 - 创建 G
 - 垃圾回收相关
 - 等等
+
